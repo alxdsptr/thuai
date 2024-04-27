@@ -821,7 +821,7 @@ void Logic::LoadBuffer(const protobuf::MessageToClient& message)
         bufferState->enemyShips.clear();
         bufferState->bullets.clear();
         bufferState->guids.clear();
-        logger->info("Buffer cleared!");
+        //logger->info("Buffer cleared!");
         // 读取新的信息
         for (const auto& obj : message.obj_message())
             if (Proto2THUAI7::messageOfObjDict[obj.message_of_obj_case()] == THUAI7::MessageOfObj::ShipMessage)
@@ -870,7 +870,7 @@ void Logic::Update() noexcept
             counterState = counterBuffer;
         }
         bufferUpdated = false;
-        logger->info("Update State!");
+        //logger->info("Update State!");
     }
 }
 

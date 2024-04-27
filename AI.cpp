@@ -3,7 +3,7 @@
 #include <array>
 #include <queue>
 #include <list>
-#include <map>
+#include <set>
 #include <cstring>
 #include "AI.h"
 #include "constants.h"
@@ -29,6 +29,14 @@ struct coordinate
     {
         return x == c.x and y == c.y;
     }
+    bool operator<(const coordinate& c) const
+    {
+        if (x < c.x)
+			return true;
+        if (x > c.x)
+            return false;
+        return y < c.y;
+    }
 };
 struct node
 {
@@ -52,7 +60,7 @@ int getIndex(THUAI7::PlaceType type)
     if (type == THUAI7::PlaceType::Construction)
         return 1;
 }
-std::list<coordinate> des_list[4];
+std::set<coordinate> des_list[4];
 
 int manhatten_distance(int x1, int y1, int x2, int y2)
     { return abs(x1 - x2) + abs(y1 - y2); };
@@ -120,7 +128,8 @@ std::deque<coordinate> search_road(int x1, int y1, int x2, int y2)
 std::deque<coordinate> search_road(int x1, int y1, THUAI7::PlaceType type)
 {
     int min_dis = 0x7fffffff, index = getIndex(type);
-    for (auto const& i : des_list[index])
+    const auto &des = des_list[index];
+    for (auto const& i : des)
     {
         int temp = manhatten_distance(x1, y1, i);
         if (temp < min_dis)
@@ -137,7 +146,7 @@ std::deque<coordinate> search_road(int x1, int y1, THUAI7::PlaceType type)
             continue;
         visited[now.x][now.y] = true;
         from[now.x][now.y] = now.from;
-        if (map[now.x][now.y] == type)
+        if (des.find({now.x, now.y}) != des.end())
         {
             std::deque<coordinate> path;
             path.push_back({now.x, now.y});
@@ -181,7 +190,7 @@ std::deque<coordinate> search_road(int x1, int y1, THUAI7::PlaceType type)
                     continue;
                 double cost = sqrt(i * i + j * j);
                 min_dis = 0x7fffffff;
-                for (auto const& k : des_list[index])
+                for (auto const& k : des)
                 {
                     int temp = manhatten_distance(x1, y1, k);
                     if (temp < min_dis)
@@ -206,7 +215,7 @@ void getMap(IShipAPI& api, bool top)
             map[i][j] = m[i][j];
             if (m[i][j] == THUAI7::PlaceType::Resource or m[i][j] == THUAI7::PlaceType::Construction)
             {
-                des_list[getIndex(m[i][j])].push_back({i, j});
+                des_list[getIndex(m[i][j])].insert({i, j});
             }
             else if (m[i][j] == THUAI7::PlaceType::Home)
             {
@@ -291,11 +300,22 @@ void AI::play(IShipAPI& api)
             {
                 if (judgeNear(x, y, THUAI7::PlaceType::Resource)){
                     int left = api.GetResourceState(target_pos.x, target_pos.y);
+                    std::cout << "distance: " << left << std::endl;
                     if (left <= 10)
                     {
-                        des_list[0].remove(target_pos);    
+                        des_list[0].erase(target_pos);    
     	                path = search_road(x / 1000, y / 1000, THUAI7::PlaceType::Resource);
                         target_pos = path.back();
+                        std::cout << "resource_pos:\n";
+                        for (auto const& i : des_list[0])
+                        {
+							std::cout << i.x << " " << i.y << std::endl;
+						}
+                        std::cout << "path:\n";
+                        for (auto const& i : path)
+                        {
+							std::cout << i.x << " " << i.y << std::endl;
+						}
                     }
                     else
                     {
@@ -315,7 +335,7 @@ void AI::play(IShipAPI& api)
             if (path.empty())
             {
                 if (judgeNear(x, y, THUAI7::PlaceType::Construction)){
-                    des_list[1].remove(target_pos);
+                    des_list[1].erase(target_pos);
                     api.Construct(construction_type);
                 }
                 else
@@ -402,7 +422,7 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
         api.SendTextMessage(1, "back");
         if (api.GetEnergy() >= 8000)
         {
-            auto res = api.InstallModule(1, THUAI7::ModuleType::ModuleConstructor3);
+            auto res = api.InstallModule(1, THUAI7::ModuleType::ModuleProducer3);
             bool success = res.get();
             std::cout << (success ? "success" : "failed") << std::endl;
             hasInstall = true;

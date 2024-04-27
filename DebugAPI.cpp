@@ -38,13 +38,13 @@ void ShipDebugAPI::StartTimer()
 {
     startPoint = std::chrono::system_clock::now();
     std::time_t t = std::chrono::system_clock::to_time_t(startPoint);
-    logger->info("=== AI.play() ===");
-    logger->info("StartTimer: {}", std::ctime(&t));
+    //logger->info("=== AI.play() ===");
+    //logger->info("StartTimer: {}", std::ctime(&t));
 }
 
 void ShipDebugAPI::EndTimer()
 {
-    logger->info("Time elapsed: {}ms", Time::TimeSinceStart(startPoint));
+    //logger->info("Time elapsed: {}ms", Time::TimeSinceStart(startPoint));
 }
 
 int32_t ShipDebugAPI::GetFrameCount() const
@@ -309,13 +309,13 @@ void TeamDebugAPI::StartTimer()
 {
     startPoint = std::chrono::system_clock::now();
     std::time_t t = std::chrono::system_clock::to_time_t(startPoint);
-    logger->info("=== AI.play() ===");
-    logger->info("StartTimer: {}", std::ctime(&t));
+    //logger->info("=== AI.play() ===");
+    //logger->info("StartTimer: {}", std::ctime(&t));
 }
 
 void TeamDebugAPI::EndTimer()
 {
-    logger->info("Time elapsed: {}ms", Time::TimeSinceStart(startPoint));
+    //logger->info("Time elapsed: {}ms", Time::TimeSinceStart(startPoint));
 }
 
 int32_t TeamDebugAPI::GetFrameCount() const
