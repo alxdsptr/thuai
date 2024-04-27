@@ -421,45 +421,87 @@ void AI::play(IShipAPI& api)
         api.MoveLeft(100);
     }
 }
+struct event
+{
+    bool finished = false;
+    std::function<bool(ITeamAPI& api)> condition;
+    std::function<bool(ITeamAPI& api)> action;
+    event(std::function<bool(ITeamAPI& api)> c, std::function<bool(ITeamAPI& api)> a) : condition(c), action(a) {}
+};
+class SequenceNode
+{
+private:
+    std::vector<event> events;
 
-
+public:
+    void perform(ITeamAPI& api)
+    {
+        for (auto& e : events)
+        {
+            if (e.finished)
+            {
+                continue;
+            }
+            if (e.condition(api))
+            {
+                bool res = e.action(api);
+                if (res)
+                    e.finished = true;
+                else
+                    return;
+            }
+        }
+    }
+    SequenceNode(std::initializer_list<event> l) : events(l) {}
+};
 //const char* get_placetype(THUAI7::PlaceType t);
 bool hasSend = false;
 bool hasInstall = false;
 bool hasBuild = false;
 bool BuildSecondCivil = false;
+bool always(ITeamAPI&)
+{
+    return true;
+}
+auto SendMessage(int id, const std::string& m)
+{
+    return [=](ITeamAPI& api)
+    {
+        auto res = api.SendTextMessage(id, m);
+        bool success = res.get();
+        return success;
+    };
+}
+auto EnergyThreshold(int threshold)
+{
+    return [threshold](ITeamAPI& api)
+    { return api.GetEnergy() >= threshold; };
+}
+auto InstallModule(int id, THUAI7::ModuleType moduleType)
+{
+    return [=](ITeamAPI& api)
+        {
+		auto res = api.InstallModule(id, moduleType);
+		bool success = res.get();
+		return success;
+	};
+}
+auto BuildShip(THUAI7::ShipType shipType)
+{
+    return [=](ITeamAPI& api)
+        {
+		auto res = api.BuildShip(shipType, 0);
+		bool success = res.get();
+		return success;
+	};
+}
+SequenceNode rootNode = {{always, SendMessage(1, "produce")}, 
+    {EnergyThreshold(8000), InstallModule(1, THUAI7::ModuleType::ModuleProducer3)}, 
+    {EnergyThreshold(12000), BuildShip(THUAI7::ShipType::MilitaryShip)}, 
+    {EnergyThreshold(4400), BuildShip(THUAI7::ShipType::CivilianShip)}};
 void AI::play(ITeamAPI& api)  // 默认team playerID 为0
 {
-    //api.PrintSelfInfo();
-    //api.InstallModule(2, THUAI7::ModuleType::ModuleLaserGun);
-    if (!hasSend)
-    {
-        api.SendTextMessage(1, "produce");
-        hasSend = true;
-    }
-    if (!hasInstall and api.GetEnergy() >= 8000){
-        auto res = api.InstallModule(1, THUAI7::ModuleType::ModuleProducer3);
-        bool success = res.get();
-        std::cout << (success ? "success" : "failed") << std::endl;
-        hasInstall = true;
-        api.SendTextMessage(1, "produce");
-    }
-    if (hasInstall and !hasBuild and api.GetEnergy() >= 12000)
-    {
-        auto res = api.BuildShip(THUAI7::ShipType::MilitaryShip, 0); 
-        bool success = res.get();
-        std::cout << (success ? "success" : "failed") << std::endl;
-        hasBuild = true;
-    }
-    if (hasInstall and hasBuild and !BuildSecondCivil and api.GetEnergy() >= 4000)
-    {
-        auto res = api.BuildShip(THUAI7::ShipType::CivilianShip, 0); 
-        bool success = res.get();
-        std::cout << (success ? "success" : "failed") << std::endl;
-        BuildSecondCivil = true;
-    }
-
-
+    rootNode.perform(api);
 }
 
 /*

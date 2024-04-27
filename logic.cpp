@@ -152,7 +152,6 @@ int32_t Logic::GetResourceState(int32_t cellX, int32_t cellY) const
     }
     else
     {
-        std::cout << "cellX: " << cellX << " cellY: " << cellY << std::endl;
         logger->warn("Resource not found");
         return -1;
     }
