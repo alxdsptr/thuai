@@ -3,7 +3,7 @@
 #include <array>
 #include <queue>
 #include <list>
-#include <set>
+#include <unordered_set>
 #include <cstring>
 #include "AI.h"
 #include "constants.h"
@@ -16,7 +16,7 @@ constexpr double PI = 3.1415926;
 // 选手需要依次将player1到player4的船类型在这里定义
 extern const std::array<THUAI7::ShipType, 4> ShipTypeDict = {
     THUAI7::ShipType::CivilianShip,
-    THUAI7::ShipType::MilitaryShip,
+    THUAI7::ShipType::CivilianShip,
     THUAI7::ShipType::MilitaryShip,
     THUAI7::ShipType::FlagShip,
 };
@@ -36,6 +36,13 @@ struct coordinate
         if (x > c.x)
             return false;
         return y < c.y;
+    }
+};
+struct PointHash
+{
+    std::size_t operator()(const coordinate& c) const
+    {
+        return std::hash<int>()(c.x * 50 + c.y); 
     }
 };
 struct node
@@ -59,8 +66,10 @@ int getIndex(THUAI7::PlaceType type)
         return 0;
     if (type == THUAI7::PlaceType::Construction)
         return 1;
+    if (type == THUAI7::PlaceType::Wormhole)
+        return 2;
 }
-std::set<coordinate> des_list[4];
+std::unordered_set<coordinate, PointHash> des_list[4];
 
 int manhatten_distance(int x1, int y1, int x2, int y2)
     { return abs(x1 - x2) + abs(y1 - y2); };
@@ -125,15 +134,31 @@ std::deque<coordinate> search_road(int x1, int y1, int x2, int y2)
         }
     }
 }
-std::deque<coordinate> search_road(int x1, int y1, THUAI7::PlaceType type)
+std::deque<coordinate> search_road(int x1, int y1, THUAI7::PlaceType type, IShipAPI& api)
 {
     int min_dis = 0x7fffffff, index = getIndex(type);
-    const auto &des = des_list[index];
-    for (auto const& i : des)
+    auto &des = des_list[index];
+    for (auto i = des.begin(); i != des.end(); )
     {
-        int temp = manhatten_distance(x1, y1, i);
+        if (type == THUAI7::PlaceType::Resource)
+        {
+            std::cout << "x: " << (*i).x << " y: " << (*i).y << std::endl;
+            int temp = api.GetResourceState((*i).x, (*i).y);
+            if (temp == 0)
+            {
+                i = des.erase(i);
+                continue;
+            }
+        }
+        else if (type == THUAI7::PlaceType::Construction and api.GetConstructionHp((*i).x, (*i).y) > 0)
+        {
+            i = des.erase(i);
+            continue;
+        }
+        int temp = manhatten_distance(x1, y1, *i);
         if (temp < min_dis)
             min_dis = temp;
+        i++;
     }
     std::priority_queue<node> pq;
     pq.push({x1, y1, coordinate{-1, -1}, 0, (double)min_dis});
@@ -180,7 +205,7 @@ std::deque<coordinate> search_road(int x1, int y1, THUAI7::PlaceType type)
                 int nx = now.x + i, ny = now.y + j;
                 if (nx < 0 or nx >= 50 or ny < 0 or ny >= 50 or visited[nx][ny])
                     continue;
-                if (map[nx][ny] == type)
+                if (des.find({nx,ny}) != des.end() and (i == 0 or j == 0))
                 {
                     double cost = sqrt(i * i + j * j);
                     pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, 0});
@@ -212,12 +237,13 @@ void getMap(IShipAPI& api, bool top)
     {
         for (int j = 0; j < m[i].size(); j++)
         {
-            map[i][j] = m[i][j];
-            if (m[i][j] == THUAI7::PlaceType::Resource or m[i][j] == THUAI7::PlaceType::Construction)
+            auto t = m[i][j];
+            map[i][j] = t;
+            if (t == THUAI7::PlaceType::Resource or t == THUAI7::PlaceType::Construction or t == THUAI7::PlaceType::Wormhole)
             {
                 des_list[getIndex(m[i][j])].insert({i, j});
             }
-            else if (m[i][j] == THUAI7::PlaceType::Home)
+            else if (t == THUAI7::PlaceType::Home)
             {
                 if (i < 25)
                 {
@@ -241,6 +267,81 @@ enum class shipState
 };
 shipState this_state; //= shipState::produce;
 THUAI7::ConstructionType construction_type;
+    bool judgeNear(int x, int y, THUAI7::PlaceType t)
+    {
+        x = x / 1000, y = y / 1000;
+        if (map[x - 1][y] == t or map[x][y - 1] == t or map[x + 1][y] == t or map[x][y + 1] == t)
+        {
+            return true;
+        }
+        return false;
+    };
+void civilShip(IShipAPI& api)
+{
+    auto info = api.GetSelfInfo();
+    int x = info->x, y = info->y;
+        if (this_state == shipState::produce)
+        {
+            if (info->shipState == THUAI7::ShipState::Producing)
+                return;
+            if (path.empty())
+            {
+                if (judgeNear(x, y, THUAI7::PlaceType::Resource)){
+                    int left = api.GetResourceState(target_pos.x, target_pos.y);
+                    //std::cout << "distance: " << left << std::endl;
+                    auto res = api.Produce();
+                    bool success = res.get();
+                    std::cout << (success ? "success" : "failed") << std::endl;
+                    if (!success)
+                    {
+    	                path = search_road(x / 1000, y / 1000, THUAI7::PlaceType::Resource, api);
+                    }
+                }
+                else
+                {
+    	            path = search_road(x / 1000, y / 1000, THUAI7::PlaceType::Resource, api);
+                    target_pos = path.back();
+                }
+            }
+        }else if (this_state == shipState::construct)
+        {
+            if (info->shipState == THUAI7::ShipState::Constructing)
+                return;
+            if (path.empty())
+            {
+                if (judgeNear(x, y, THUAI7::PlaceType::Construction)){
+                    api.Construct(construction_type);
+                }
+                else
+                {
+    	            path = search_road(x / 1000, y / 1000, THUAI7::PlaceType::Construction, api);
+                    target_pos = path.back();
+                }
+            }
+        }
+        else if (this_state == shipState::back)
+        {
+            if (path.empty())
+            {
+                path = search_road(x / 1000, y / 1000, home_pos.x, home_pos.y); 
+                api.EndAllAction();
+            }
+        }
+        if (api.GetSelfInfo()->shipState == THUAI7::ShipState::Idle and !path.empty())
+        {
+            auto next = path.front();
+            path.pop_front();
+            int dx = next.x * 1000 + 500 - x;
+            int dy = next.y * 1000 + 500 - y;
+            std::cout << "x: " << x << " y: " << y << "nx: " << next.x << "ny: " << next.y << std::endl;
+            std::cout << "dx: " << dx << " dy: " << dy << std::endl;
+            double time = sqrt(dx * dx + dy * dy) / 3.0;
+            double angle = atan2(dy, dx);
+            std::cout << "time: " << time << " angle: " << angle << std::endl;
+		    api.Move(time, angle);
+            //std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+		}
+}
 void AI::play(IShipAPI& api)
 {
     auto info = api.GetSelfInfo();
@@ -278,103 +379,25 @@ void AI::play(IShipAPI& api)
         else if (message.find("back") == 0)
         {
             this_state = shipState::back;
+            std::cout << "back" << std::endl;
         }
     }
-    api.GetGameInfo();
-    auto judgeNear = [](int x, int y, THUAI7::PlaceType t)
-    {
-        x = x / 1000, y = y / 1000;
-        if (map[x - 1][y] == t or map[x][y - 1] == t or map[x + 1][y] == t or map[x][y + 1] == t)
-        {
-            return true;
-        }
-        return false;
-    };
     if (this->playerID == 1)
     {
-        if (this_state == shipState::produce)
-        {
-            if (info->shipState == THUAI7::ShipState::Producing)
-                return;
-            if (path.empty())
-            {
-                if (judgeNear(x, y, THUAI7::PlaceType::Resource)){
-                    int left = api.GetResourceState(target_pos.x, target_pos.y);
-                    std::cout << "distance: " << left << std::endl;
-                    if (left <= 10)
-                    {
-                        des_list[0].erase(target_pos);    
-    	                path = search_road(x / 1000, y / 1000, THUAI7::PlaceType::Resource);
-                        target_pos = path.back();
-                        std::cout << "resource_pos:\n";
-                        for (auto const& i : des_list[0])
-                        {
-							std::cout << i.x << " " << i.y << std::endl;
-						}
-                        std::cout << "path:\n";
-                        for (auto const& i : path)
-                        {
-							std::cout << i.x << " " << i.y << std::endl;
-						}
-                    }
-                    else
-                    {
-                        api.Produce();
-                    }
-                }
-                else
-                {
-    	            path = search_road(x / 1000, y / 1000, THUAI7::PlaceType::Resource);
-                    target_pos = path.back();
-                }
-            }
-        }else if (this_state == shipState::construct)
-        {
-            if (info->shipState == THUAI7::ShipState::Constructing)
-                return;
-            if (path.empty())
-            {
-                if (judgeNear(x, y, THUAI7::PlaceType::Construction)){
-                    des_list[1].erase(target_pos);
-                    api.Construct(construction_type);
-                }
-                else
-                {
-    	            path = search_road(x / 1000, y / 1000, THUAI7::PlaceType::Construction);
-                    target_pos = path.back();
-                }
-            }
-        }
-        else if (this_state == shipState::back)
-        {
-            if (path.empty())
-            {
-                path = search_road(x / 1000, y / 1000, home_pos.x, home_pos.y); 
-                api.EndAllAction();
-            }
-        }
-        if (api.GetSelfInfo()->shipState == THUAI7::ShipState::Idle and !path.empty())
-        {
-            auto next = path.front();
-            path.pop_front();
-            int dx = next.x * 1000 + 500 - x;
-            int dy = next.y * 1000 + 500 - y;
-            std::cout << "x: " << x << " y: " << y << "nx: " << next.x << "ny: " << next.y << std::endl;
-            std::cout << "dx: " << dx << " dy: " << dy << std::endl;
-            double time = sqrt(dx * dx + dy * dy) / 3.0;
-            double angle = atan2(dy, dx);
-            std::cout << "time: " << time << " angle: " << angle << std::endl;
-		    api.Move(time, angle);
-            //std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-		}
+        civilShip(api);
     }
     else if (this->playerID == 2)
+    {
+        civilShip(api);
+    }
+
+    else if (this->playerID == 3)
     {
         auto info = api.GetSelfInfo();
         int x = info->x, y = info->y;
         if (path.empty())
         {
-            path = search_road(x / 1000, y / 1000, THUAI7::PlaceType::Wormhole);
+            path = search_road(x / 1000, y / 1000, THUAI7::PlaceType::Wormhole, api);
         }
         if (api.GetSelfInfo()->shipState == THUAI7::ShipState::Idle and !path.empty())
         {
@@ -390,10 +413,6 @@ void AI::play(IShipAPI& api)
 		    api.Move(time, angle);
             //std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 		}
-    }
-
-    else if (this->playerID == 3)
-    {
     }
     else if (this->playerID == 4)
     {
@@ -408,6 +427,7 @@ void AI::play(IShipAPI& api)
 bool hasSend = false;
 bool hasInstall = false;
 bool hasBuild = false;
+bool BuildSecondCivil = false;
 void AI::play(ITeamAPI& api)  // 默认team playerID 为0
 {
     //api.PrintSelfInfo();
@@ -417,23 +437,28 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
         api.SendTextMessage(1, "produce");
         hasSend = true;
     }
-    if (!hasInstall and api.GetEnergy() >= 7000)
-    {
-        api.SendTextMessage(1, "back");
-        if (api.GetEnergy() >= 8000)
-        {
-            auto res = api.InstallModule(1, THUAI7::ModuleType::ModuleProducer3);
-            bool success = res.get();
-            std::cout << (success ? "success" : "failed") << std::endl;
-            hasInstall = true;
-            api.SendTextMessage(1, "produce");
-        }
+    if (!hasInstall and api.GetEnergy() >= 8000){
+        auto res = api.InstallModule(1, THUAI7::ModuleType::ModuleProducer3);
+        bool success = res.get();
+        std::cout << (success ? "success" : "failed") << std::endl;
+        hasInstall = true;
+        api.SendTextMessage(1, "produce");
     }
-    if (hasInstall and !hasBuild and api.GetEnergy() >= 8000)
+    if (hasInstall and !hasBuild and api.GetEnergy() >= 12000)
     {
-        api.BuildShip(THUAI7::ShipType::MilitaryShip, 0); 
+        auto res = api.BuildShip(THUAI7::ShipType::MilitaryShip, 0); 
+        bool success = res.get();
+        std::cout << (success ? "success" : "failed") << std::endl;
         hasBuild = true;
     }
+    if (hasInstall and hasBuild and !BuildSecondCivil and api.GetEnergy() >= 4000)
+    {
+        auto res = api.BuildShip(THUAI7::ShipType::CivilianShip, 0); 
+        bool success = res.get();
+        std::cout << (success ? "success" : "failed") << std::endl;
+        BuildSecondCivil = true;
+    }
+
 
 }
 
