@@ -427,24 +427,24 @@ void AI::play(IShipAPI& api)
     }
 }
 
+/**
+* @enum NodeState
+* @brief 节点运行状态
+*/
 enum NodeState
 {
-    IDLE = 0,
-    SUCCESS,
-    FAIL,
-    RUNNING
+    IDLE = 0,///<未初始化值
+    SUCCESS,///<成功
+    FAIL,///<失败
+    RUNNING///<操作尚未完成，需要继续运行该节点
 };
 
-//struct event
-//{
-//    bool finished = false;
-//    std::function<bool(ITeamAPI& api)> condition;
-//    std::function<NodeState(ITeamAPI& api)> action;
-//    event(std::function<bool(ITeamAPI& api)> c, std::function<NodeState(ITeamAPI& api)> a) : condition(c), action(a) {}
-//};
 
-
-
+/** 
+* @class rootNode
+* @brief 提供行为树节点的基本内容
+* @see NodeState
+*/
 class rootNode
 {
 public:
@@ -465,16 +465,24 @@ public:
     }
 };
 
+/**
+* @class eventNode
+* @brief 事件节点，当条件为真执行事件，并储存事件执行状态；否则节点状态为FAIL
+* @param condition 返回是否执行的布尔值的条件函数
+* @param action 待执行的操作对应的函数
+* 
+*/
 class eventNode :public rootNode
 {
 public:
-    std::function<bool(ITeamAPI& api)> condition;
-    std::function<NodeState(ITeamAPI& api)> action;
+    std::function<bool(ITeamAPI& api)> condition;///<执行条件
+    std::function<NodeState(ITeamAPI& api)> action;///<待执行的函数
     eventNode(std::function<bool(ITeamAPI& api)> c, std::function<NodeState(ITeamAPI& api)> a) :
         condition(c),
         action(a)
     {
     }
+
 
     virtual NodeState perform(ITeamAPI& api)
     {
@@ -508,6 +516,12 @@ public:
     }
 };
 
+
+/**
+* @class SequenceNode
+* @brief 队列节点，依次执行子节点，直到节点返回结果为FAIL或全部子节点都被执行完
+* @param state 与最后一个执行的子节点的状态相同
+*/
 class SequenceNode :public rootNode
 {
 private:
@@ -524,6 +538,12 @@ public:
     std::vector<rootNode *> events;
     int curChild;
 
+    /**
+     * @brief 队列节点的perform函数\n
+     * - 按照顺序执行子节点，如果成功，则下次调用时执行下一节点（如果全部执行完，将重置子节点状态）；如果失败，本队列节点的状态将被设为FAIL，并重置子节点状态
+     * @param api 
+     * @return 仅当当前执行的子节点返回FAIL时返回FAIL、最后一个子节点返回SUCCESS时返回SUCCESS；否则返回RUNNING
+     */
     virtual NodeState perform(ITeamAPI& api)
     {
         switch (state)
@@ -584,6 +604,11 @@ public:
     }
 };
 
+
+/**
+ * @brief 节点功能：反复执行子节点，直到返回SUCCESS
+ * 
+ */
 class TryUntilSuccessNode :public rootNode
 {
 public:
@@ -592,6 +617,11 @@ public:
         rootNode(RUNNING), child(x)
     {}
 
+    /**
+     * @brief TryUntilSuccess对应的perform虚函数
+     * @param api 
+     * @return 若子节点返回SUCCESS或当前状态已经为SUCCESS，则返回SUCCESS；反之返回RUNNING
+     */
     virtual NodeState perform(ITeamAPI& api)
     {
         if (state==IDLE)
@@ -623,15 +653,20 @@ public:
     }
 };
 
+/**
+ * @brief decorator节点，执行一次子节点，不论子节点返回值如何，均返回SUCCESS
+ */
 class AlwaysSuccessNode : public rootNode
 {
 public:
-    rootNode* child;
+
+    rootNode* child;///<要执行的子节点
     AlwaysSuccessNode(rootNode* x) :
         rootNode(IDLE),
         child(x)
     {
     }
+
 
     virtual NodeState perform(ITeamAPI& api)
     {
@@ -658,6 +693,99 @@ public:
     {
         delete child;
         child = NULL;
+    }
+};
+
+/**
+ * @brief 选择器节点，依次尝试每个子节点，直到有一个成功或全部失败
+ */
+class fallbackNode :public rootNode
+{
+private:
+    inline void RewindChildren()
+    {
+        for (size_t i = 0; i < events.size(); i++)
+        {
+            events[i]->state = IDLE;
+        }
+        curChild = 0;
+    }
+
+public:
+    std::vector<rootNode*> events;
+    int curChild;
+
+    /**
+     * @brief 选择器节点的perform函数
+     * - 如果当前子节点返回SUCCESS，则重置全部子节点状态，本节点状态设为SUCCESS并返回SUCCESS
+     * - 如果当前子节点返回RUNNING，下一次调用时仍调用该子节点，直到它返回FAIL或SUCCESS；返回RUNNING
+     * - 如果当前子节点返回FAIL
+     *  . 如果已经是最后一个子节点，则本节点状态为FAIL，返回FAIL
+     *  . 否则下一次调用执行下一个子节点，本次返回RUNNING
+     * @param api 
+     * @return 
+     */
+    virtual NodeState perform(ITeamAPI& api)
+    {
+        switch (state)
+        {
+            case IDLE:
+                state = RUNNING;
+                break;
+            case RUNNING:
+                break;
+            default:
+                return state;
+                break;
+        }
+
+        switch (events[curChild]->perform(api))
+        {
+            case RUNNING:
+                break;
+            case FAIL:
+                if (curChild == events.size() - 1)
+                {
+                    state = FAIL;
+                    RewindChildren();
+                }
+                else
+                {
+                    curChild++;
+                }
+                break;
+            case SUCCESS:
+                state = SUCCESS;
+                RewindChildren();
+                break;
+            default:
+                break;
+        }
+        return state;
+    }
+
+    fallbackNode(std::initializer_list<rootNode*> l) :
+        events(l),
+        curChild(0)
+    {
+    }
+
+    fallbackNode(const fallbackNode& a) :
+        curChild(0)
+    {
+        for (size_t i = 0; i < a.events.size(); i++)
+        {
+            events.push_back(new auto(*a.events[i]));
+        }
+    }
+
+    virtual ~fallbackNode()
+    {
+        for (size_t i = 0; i < events.size(); i++)
+        {
+            delete events[i];
+            events[i] = NULL;
+        }
     }
 };
 
