@@ -23,7 +23,7 @@ extern const std::array<THUAI7::ShipType, 4> ShipTypeDict = {
     THUAI7::ShipType::MilitaryShip,
     THUAI7::ShipType::FlagShip,
 };
-
+ 
 // 可以在AI.cpp内部声明变量与函数
 struct coordinate
 {
