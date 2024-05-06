@@ -68,6 +68,7 @@ coordinate from[maxLen][maxLen];
 
 enum ShipMode
 {
+    IDLE,
     ATTACK,
     REVENGE,
     HIDE,
@@ -79,15 +80,18 @@ enum ShipMode
 };
 
 
-struct selfShipinfo
+struct ShipInfo
 {
-    THUAI7::Ship me;
-    THUAI7::Ship NearestEnemyShip;
-    std::vector<std::shared_ptr<const THUAI7::Ship>> EnemyShips;
+    //THUAI7::Ship NearestEnemyShip;
     ShipMode mode;
-    THUAI7::Ship TargetShip;
-    coordinate TargetPos;
-}myself;
+    //THUAI7::Ship TargetShip;
+    //coordinate TargetPos;
+    //THUAI7::ConstructionType ConsType;
+    //const char end = '\0';
+};
+
+ShipInfo myself = {IDLE};
+
 
 
 
@@ -614,6 +618,11 @@ namespace ShipBT
             return IDLE;
         }
 
+        virtual void Clear()
+        {
+            state = IDLE;
+        }
+
         virtual ~rootNode()
         {
         }
@@ -661,6 +670,11 @@ namespace ShipBT
             }
 
             return state;
+        }
+
+        virtual void Clear()
+        {
+            state = IDLE;
         }
 
         virtual ~eventNode()
@@ -733,6 +747,16 @@ namespace ShipBT
             }
             return state;
         }
+
+        virtual void Clear()
+        {
+            state = IDLE;
+            for (size_t i = 0; i < events.size(); i++)
+            {
+                events[i]->Clear();
+            }
+        }
+
         SequenceNode(std::initializer_list<rootNode*> l) :
             events(l),
             curChild(0)
@@ -801,6 +825,12 @@ namespace ShipBT
             return state;
         }
 
+        virtual void Clear()
+        {
+            state = IDLE;
+            child->Clear();
+        }
+
         virtual ~TryUntilSuccessNode()
         {
             delete child;
@@ -840,6 +870,12 @@ namespace ShipBT
                 }
             }
             return state;
+        }
+
+        virtual void Clear()
+        {
+            state = IDLE;
+            child->Clear();
         }
 
         virtual ~AlwaysSuccessNode()
@@ -917,6 +953,15 @@ namespace ShipBT
             return state;
         }
 
+        virtual void Clear()
+        {
+            state = IDLE;
+            for (size_t i = 0; i < events.size(); i++)
+            {
+                events[i]->Clear();
+            }
+        }
+
         fallbackNode(std::initializer_list<rootNode*> l) :
             events(l),
             curChild(0)
@@ -992,7 +1037,8 @@ namespace Conditions
 
 namespace HomeAction
 {
-    auto SendMessage(int id, const std::string& m)
+    template<int id>
+    auto SendMessage(const std::string& m)
     {
         return [=](ITeamAPI& api)
         {
@@ -1073,6 +1119,27 @@ namespace revenge
         return a > b ? b : a;
     }
 
+}
+
+namespace Communication
+{
+    bool RefreshInfo(IShipAPI& api)
+    {
+        if (!api.HaveMessage())
+        {
+            return false;
+        }
+        else
+        {
+
+            std::string mes = (api.GetMessage()).second;
+            memcpy(&myself, mes.data(), mes.size());
+
+
+            std::cout << ((myself.mode == ATTACK) ? "yes" : "NO") << std::endl;
+            return true;
+        }
+    }
 }
 
 
@@ -1451,86 +1518,137 @@ void civilShip(IShipAPI& api)
     }
 }
 
+#include<iomanip>
+
+//void AI::play(IShipAPI& api)
+//{
+//    auto info = api.GetSelfInfo();
+//    int x = info->x, y = info->y;
+//
+//
+//    if (!MapInfo::hasGetMap)
+//    {
+//        MapInfo::hasGetMap = true;
+//        MapInfo::getMap(api, x / 1000 < 25 ? true : false);
+//    }
+//
+//
+//
+//    //std::string mes = api.GetMessage().second;
+//
+//    //for (size_t i = 0; i < mes.size(); i++)
+//    //{
+//    //    std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(mes[i]) << " ";
+//    //}
+//    //std::cout << std::endl;
+//
+//    if (api.HaveMessage())
+//    {
+//        auto m = api.GetMessage();
+//        std::string message = m.second;
+//        if (message == "produce")
+//        {
+//            this_state = shipState::produce;
+//        }
+//        else if (message.find("construct") == 0)
+//        {
+//            this_state = shipState::construct;
+//            auto type = message.substr(9);
+//            if (type == "factory")
+//            {
+//                construction_type = THUAI7::ConstructionType::Factory;
+//            }
+//            else if (type == "fort")
+//            {
+//                construction_type = THUAI7::ConstructionType::Fort;
+//            }
+//            else if (type == "community")
+//            {
+//                construction_type = THUAI7::ConstructionType::Community;
+//            }
+//        }
+//        else if (message.find("back") == 0)
+//        {
+//            this_state = shipState::back;
+//            std::cout << "back" << std::endl;
+//        }
+//    }
+//    if (this->playerID == 1)
+//    {
+//
+//
+//
+//
+//        civilShip(api);
+//    }
+//    else if (this->playerID == 2)
+//    {
+//        civilShip(api);
+//    }
+//
+//    else if (this->playerID == 3)
+//    {
+//        auto info = api.GetSelfInfo();
+//        int x = info->x, y = info->y;
+//        if (path.empty())
+//        {
+//            path = search_road(x / 1000, y / 1000, THUAI7::PlaceType::Wormhole, api);
+//        }
+//        if (api.GetSelfInfo()->shipState == THUAI7::ShipState::Idle and !path.empty())
+//        {
+//            auto next = path.front();
+//            path.pop_front();
+//            int dx = next.x * 1000 + 500 - x;
+//            int dy = next.y * 1000 + 500 - y;
+//            std::cout << "x: " << x << " y: " << y << "nx: " << next.x << "ny: " << next.y << std::endl;
+//            std::cout << "dx: " << dx << " dy: " << dy << std::endl;
+//            double time = sqrt(dx * dx + dy * dy) / 3.0;
+//            double angle = atan2(dy, dx);
+//            std::cout << "time: " << time << " angle: " << angle << std::endl;
+//            api.Move(time, angle);
+//        }
+//    }
+//    else if (this->playerID == 4)
+//    {
+//        api.MoveDown(100);
+//        std::this_thread::sleep_for(std::chrono::seconds(1));
+//        api.MoveLeft(100);
+//    }
+//}
+
+//std::string operator==(ShipInfo a, ShipInfo b)
+//{
+//    if (a.ConsType==b.ConsType&&a.mode==b.mode)
+//    {
+//        return "yes";
+//    }
+//    return "fail";
+//}
+
+
+ShipMode cur_Mode = IDLE;
+
+
+
+
+ShipBT::rootNode* shipTreeList[9];
+
+
 void AI::play(IShipAPI& api)
 {
-    auto info = api.GetSelfInfo();
-    int x = info->x, y = info->y;
-    if (!MapInfo::hasGetMap)
-    {
-        MapInfo::hasGetMap = true;
-        MapInfo::getMap(api, x / 1000 < 25 ? true : false);
-    }
-    if (api.HaveMessage())
-    {
-        auto m = api.GetMessage();
-        std::string message = m.second;
-        if (message == "produce")
-        {
-            this_state = shipState::produce;
-        }
-        else if (message.find("construct") == 0)
-        {
-            this_state = shipState::construct;
-            auto type = message.substr(9);
-            if (type == "factory")
-            {
-                construction_type = THUAI7::ConstructionType::Factory;
-            }
-            else if (type == "fort")
-            {
-                construction_type = THUAI7::ConstructionType::Fort;
-            }
-            else if (type == "community")
-            {
-                construction_type = THUAI7::ConstructionType::Community;
-            }
-        }
-        else if (message.find("back") == 0)
-        {
-            this_state = shipState::back;
-            std::cout << "back" << std::endl;
-        }
-    }
-    if (this->playerID == 1)
-    {
-        civilShip(api);
-    }
-    else if (this->playerID == 2)
-    {
-        civilShip(api);
-    }
+    Communication::RefreshInfo(api);
 
-    else if (this->playerID == 3)
-    {
-        auto info = api.GetSelfInfo();
-        int x = info->x, y = info->y;
-        if (path.empty())
-        {
-            path = search_road(x / 1000, y / 1000, THUAI7::PlaceType::Wormhole, api);
-        }
-        if (api.GetSelfInfo()->shipState == THUAI7::ShipState::Idle and !path.empty())
-        {
-            auto next = path.front();
-            path.pop_front();
-            int dx = next.x * 1000 + 500 - x;
-            int dy = next.y * 1000 + 500 - y;
-            std::cout << "x: " << x << " y: " << y << "nx: " << next.x << "ny: " << next.y << std::endl;
-            std::cout << "dx: " << dx << " dy: " << dy << std::endl;
-            double time = sqrt(dx * dx + dy * dy) / 3.0;
-            double angle = atan2(dy, dx);
-            std::cout << "time: " << time << " angle: " << angle << std::endl;
-            api.Move(time, angle);
-        }
-    }
-    else if (this->playerID == 4)
-    {
-        api.MoveDown(100);
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        api.MoveLeft(100);
-    }
+
+
+     //if (myself.mode!=cur_Mode)
+     //{
+     //    shipTreeList[cur_Mode]->Clear();
+     //    cur_Mode = myself.mode;
+
+     //}
+
+     //shipTreeList[cur_Mode]->perform(api);
 }
-
-
 
 
 
@@ -1550,15 +1668,13 @@ bool BuildSecondCivil = false;
 
 
 
-
+volatile int Ind = 2;
 
 TeamBT::SequenceNode root = {
-    new TeamBT::AlwaysSuccessNode(
-        new TeamBT::eventNode({Conditions::always, HomeAction::SendMessage(1, "produce")})
-    ),
+    new TeamBT::AlwaysSuccessNode(new TeamBT::eventNode({Conditions::always, HomeAction::SendMessage<1>("produce")})),
     new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3)})),
     new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip)})),
-    new TeamBT::AlwaysSuccessNode(new TeamBT::eventNode({Conditions::always, HomeAction::SendMessage(2, "constructfactory")})),
+    new TeamBT::AlwaysSuccessNode(new TeamBT::eventNode({Conditions::always, HomeAction::SendMessage<2>("constructfactory")})),
     new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip)})),
     new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)})),
     new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)}))
@@ -1566,20 +1682,51 @@ TeamBT::SequenceNode root = {
 
 
 
+ShipInfo ships[4];
+
+
+const size_t SHIPINFO_SIZE = sizeof(ShipInfo);
+using bytePointer = unsigned char*;
+
+void sync_ships(ITeamAPI& api)
+{
+    auto players = api.GetShips();
+    for (size_t i = 0; i < players.size(); i++)
+    {
+        int ind = players[i]->playerID;
+        bytePointer pos = (bytePointer)&ships[i];
+        std::string message;
+        message.resize(SHIPINFO_SIZE + 1);
+        memcpy(message.data(), &ships[i], SHIPINFO_SIZE);
+        message[SHIPINFO_SIZE] = '\0';
+        api.SendBinaryMessage(ind, message);
+    }
+}
+
+
+
 bool run = true;
 
 const char* get__placetype(THUAI7::PlaceType t);
 
+
 void AI::play(ITeamAPI& api)  // 默认team playerID 为0
 {
-
-    if (run)
-    {
-        if (root.perform(api)!=TeamBT::RUNNING)
-        {
-            run = false;
-        }
-    }
+    //root.perform(api);
+    ships[0] = {
+        ATTACK
+    };
+    sync_ships(api);
+    //api.SendTextMessage(1, "hello");
+    //api.SendTextMessage(2, "hello");
+    //Ind = 1;
+    //if (run)
+    //{
+    //    if (root.perform(api)!=TeamBT::RUNNING)
+    //    {
+    //        run = false;
+    //    }
+    //}
     
     //auto mp = api.GetFullMap();
 
