@@ -7,6 +7,9 @@
 #include <cstring>
 #include "AI.h"
 #include "constants.h"
+#include<algorithm>
+
+
 #define maxLen 55
 // 注意不要使用conio.h，Windows.h等非标准库
 // 为假则play()期间确保游戏状态不更新，为真则只保证游戏状态在调用相关方法时不更新，大致一帧更新一次
@@ -42,6 +45,11 @@ struct coordinate
             return false;
         return y < c.y;
     }
+    coordinate(int x=0, int y=0) :
+        x(x),
+        y(y)
+    {
+    }
 };
 struct PointHash
 {
@@ -68,7 +76,7 @@ coordinate from[maxLen][maxLen];
 
 enum ShipMode
 {
-    IDLE,
+    IDLE=0,
     ATTACK,
     REVENGE,
     HIDE,
@@ -76,7 +84,8 @@ enum ShipMode
     CONSTRUCT,
     ROB,
     RUIN,
-    FOLLOW
+    FOLLOW,
+    ROADSEARCH
 };
 
 
@@ -84,16 +93,49 @@ struct ShipInfo
 {
     //THUAI7::Ship NearestEnemyShip;
     ShipMode mode;
-    //THUAI7::Ship TargetShip;
-    //coordinate TargetPos;
+    THUAI7::Ship me;
+    coordinate TargetPos;//<注意为格子数，不是坐标值
     //THUAI7::ConstructionType ConsType;
     //const char end = '\0';
 };
 
-ShipInfo myself = {IDLE};
+ShipInfo myself = {IDLE, {0, 0}};
 
+/**
+ * @brief 为舰船行为函数提供返回值模板
+ * 
+ */
+struct ModeRetval
+{
+    ShipMode mode;
+    bool immediate;
+};
 
+/**
+ * @brief 判断自己是否在某类型格子附近
+ * @param x x坐标
+ * @param y y坐标
+ * @param t 格子类型
+ * @return 
+ */
+bool judgeNear(int x, int y, THUAI7::PlaceType t)
+{
+    x = x / 1000, y = y / 1000;
+    if (MapInfo::map[x - 1][y] == t or MapInfo::map[x][y - 1] == t or MapInfo::map[x + 1][y] == t or MapInfo::map[x][y + 1] == t)
+    {
+        return true;
+    }
+    return false;
+};
 
+inline int manhatten_distance(int x1, int y1, int x2, int y2)
+{
+    return abs(x1 - x2) + abs(y1 - y2);
+};
+inline int manhatten_distance(int x1, int y1, coordinate c)
+{
+    return abs(x1 - c.x) + abs(y1 - c.y);
+};
 
 namespace MapInfo
 {
@@ -109,6 +151,10 @@ namespace MapInfo
         Construction = 7,
         Wormhole = 8,
     };
+
+    std::vector<coordinate> PositionLists[9];
+
+
 
     Place PlaceTypeConvert(THUAI7::PlaceType t)
     {
@@ -211,6 +257,7 @@ namespace MapInfo
             for (size_t j = 0; j < 50; j++)
             {
                 fullmap[i][j] = PlaceTypeConvert(mp[i][j]);
+                PositionLists[PlaceTypeConvert(mp[i][j])].push_back(coordinate(i, j));
             }
         }
         
@@ -1143,17 +1190,6 @@ namespace Communication
 }
 
 
-//bool moved = false;
-
-
-inline int manhatten_distance(int x1, int y1, int x2, int y2)
-{
-    return abs(x1 - x2) + abs(y1 - y2);
-};
-inline int manhatten_distance(int x1, int y1, coordinate c)
-{
-    return abs(x1 - c.x) + abs(y1 - c.y);
-};
 std::deque<coordinate> search_road(int x1, int y1, int x2, int y2)
 {
     std::priority_queue<node> pq;
@@ -1309,6 +1345,325 @@ std::deque<coordinate> search_road(int x1, int y1, THUAI7::PlaceType type, IShip
     }
 }
 
+namespace IdleMode
+{
+    ModeRetval Perform(IShipAPI&)
+    {
+        if (myself.mode!=IDLE)
+        {
+            return {
+                myself.mode,
+                true
+            };
+        }
+        return {
+            IDLE,
+            false
+        };
+    }
+
+    void Clear(IShipAPI& api)
+    {
+
+    }
+}
+
+namespace RoadSearchMode
+{
+    std::deque<coordinate> path;
+    bool visited[maxLen][maxLen];
+    coordinate from[maxLen][maxLen];
+
+    std::deque<coordinate> search_road(int x1, int y1, int x2, int y2)
+    {
+        std::priority_queue<node> pq;
+        pq.push({x1, y1, coordinate{-1, -1}, 0, (double)manhatten_distance(x1, y1, x2, y2)});
+        memset(visited, false, sizeof(visited));
+        while (!pq.empty())
+        {
+            node now = pq.top();
+            pq.pop();
+            if (visited[now.x][now.y])
+                continue;
+            visited[now.x][now.y] = true;
+            from[now.x][now.y] = now.from;
+            if (now.x == x2 && now.y == y2)
+            {
+                std::deque<coordinate> path;
+                path.push_back({now.x, now.y});
+                coordinate temp = now.from;
+                while (temp.x != -1)
+                {
+                    path.push_front({temp.x, temp.y});
+                    temp = from[temp.x][temp.y];
+                }
+                path.pop_front();
+                return path;
+            }
+            auto is_empty = [](THUAI7::PlaceType t)
+            {
+                return t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole;
+            };
+            for (int i = -1; i <= 1; i++)
+            {
+                for (int j = -1; j <= 1; j++)
+                {
+                    if (i == 0 and j == 0)
+                        continue;
+                    if (i == -1 and j == -1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
+                        continue;
+                    if (i == 1 and j == -1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
+                        continue;
+                    if (i == -1 and j == 1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
+                        continue;
+                    if (i == 1 and j == 1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
+                        continue;
+                    int nx = now.x + i, ny = now.y + j;
+                    if (nx < 0 or nx >= 50 or ny < 0 or ny >= 50 or visited[nx][ny])
+                        continue;
+                    if (nx == x2 and ny == y2)
+                    {
+                        double cost = sqrt(i * i + j * j);
+                        pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, 0});
+                    }
+                    THUAI7::PlaceType t = MapInfo::map[nx][ny];
+                    if (t != THUAI7::PlaceType::Space and t != THUAI7::PlaceType::Shadow and t != THUAI7::PlaceType::Wormhole)
+                        continue;
+                    double cost = sqrt(i * i + j * j);
+                    int h = manhatten_distance(nx, ny, x2, y2);
+                    pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, (double)h});
+                }
+            }
+        }
+    }
+    std::deque<coordinate> search_road(int x1, int y1, THUAI7::PlaceType type, IShipAPI& api)
+    {
+        int min_dis = 0x7fffffff, index = MapInfo::getIndex(type);
+        auto& des = MapInfo::des_list[index];
+        for (auto i = des.begin(); i != des.end();)
+        {
+            if (type == THUAI7::PlaceType::Resource)
+            {
+                std::cout << "x: " << (*i).x << " y: " << (*i).y << std::endl;
+                int temp = api.GetResourceState((*i).x, (*i).y);
+                if (temp == 0)
+                {
+                    i = des.erase(i);
+                    continue;
+                }
+            }
+            else if (type == THUAI7::PlaceType::Construction and api.GetConstructionHp((*i).x, (*i).y) > 0)
+            {
+                i = des.erase(i);
+                continue;
+            }
+            int temp = manhatten_distance(x1, y1, *i);
+            if (temp < min_dis)
+                min_dis = temp;
+            i++;
+        }
+        std::priority_queue<node> pq;
+        pq.push({x1, y1, coordinate{-1, -1}, 0, (double)min_dis});
+        memset(visited, false, sizeof(visited));
+        while (!pq.empty())
+        {
+            node now = pq.top();
+            pq.pop();
+            if (visited[now.x][now.y])
+                continue;
+            visited[now.x][now.y] = true;
+            from[now.x][now.y] = now.from;
+            if (des.find({now.x, now.y}) != des.end())
+            {
+                std::deque<coordinate> path;
+                path.push_back({now.x, now.y});
+                coordinate temp = now.from;
+                while (temp.x != -1)
+                {
+                    path.push_front({temp.x, temp.y});
+                    temp = from[temp.x][temp.y];
+                }
+                path.pop_front();
+                return path;
+            }
+            auto is_empty = [](THUAI7::PlaceType t)
+            {
+                return t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole;
+            };
+            for (int i = -1; i <= 1; i++)
+            {
+                for (int j = -1; j <= 1; j++)
+                {
+                    if (i == 0 and j == 0)
+                        continue;
+                    if (i == -1 and j == -1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
+                        continue;
+                    if (i == 1 and j == -1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
+                        continue;
+                    if (i == -1 and j == 1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
+                        continue;
+                    if (i == 1 and j == 1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
+                        continue;
+                    int nx = now.x + i, ny = now.y + j;
+                    if (nx < 0 or nx >= 50 or ny < 0 or ny >= 50 or visited[nx][ny])
+                        continue;
+                    if (des.find({nx, ny}) != des.end() and (i == 0 or j == 0))
+                    {
+                        double cost = sqrt(i * i + j * j);
+                        pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, 0});
+                    }
+                    THUAI7::PlaceType t = MapInfo::map[nx][ny];
+                    if (t != THUAI7::PlaceType::Space and t != THUAI7::PlaceType::Shadow and t != THUAI7::PlaceType::Wormhole)
+                        continue;
+                    double cost = sqrt(i * i + j * j);
+                    min_dis = 0x7fffffff;
+                    for (auto const& k : des)
+                    {
+                        int temp = manhatten_distance(x1, y1, k);
+                        if (temp < min_dis)
+                            min_dis = temp;
+                    }
+                    pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, (double)min_dis});
+                }
+            }
+        }
+    }
+
+    ModeRetval Perform(IShipAPI& api)
+    {
+        if (path.empty())
+        {
+            if (manhatten_distance(myself.me.x,myself.me.y,myself.TargetPos)<=2)
+            {
+                return {
+                    IDLE,
+                    true
+                };
+            }
+            path = search_road(myself.me.x / 1000, myself.me.y / 1000, myself.TargetPos.x, myself.TargetPos.y);
+        }
+        if (api.GetSelfInfo()->shipState == THUAI7::ShipState::Idle and !path.empty())
+        {
+            auto next = path.front();
+            path.pop_front();
+            int dx = next.x * 1000 + 500 - myself.me.x;
+            int dy = next.y * 1000 + 500 - myself.me.y;
+            std::cout << "x: " << myself.me.x << " y: " << myself.me.y << "nx: " << next.x << "ny: " << next.y << std::endl;
+            std::cout << "dx: " << dx << " dy: " << dy << std::endl;
+            double time = sqrt(dx * dx + dy * dy) / 3.0;
+            double angle = atan2(dy, dx);
+            std::cout << "time: " << time << " angle: " << angle << std::endl;
+            api.Move(time, angle);
+            // std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        }
+        return {
+            ROADSEARCH,
+            false
+        };
+    }
+
+    void Clear(IShipAPI& api)
+    {
+        path.clear();
+    }
+
+}
+
+namespace ProduceMode
+{
+    bool GetNearestResource(IShipAPI& api)
+    {
+        coordinate tmp;
+        int x = myself.me.x / 1000;//<格子数
+        int y = myself.me.y / 1000;  //<格子数
+        int sz = MapInfo::PositionLists[MapInfo::Resource].size();
+        if (!sz)
+        {
+            return false;
+        }
+        tmp = MapInfo::PositionLists[MapInfo::Resource][0];
+        for (size_t i = 1; i < sz; i++)
+        {
+            if (manhatten_distance(x,y,MapInfo::PositionLists[MapInfo::Resource][i])<manhatten_distance(x,y,tmp))
+            {
+                tmp = MapInfo::PositionLists[MapInfo::Resource][i];
+            }
+        }
+        myself.TargetPos = tmp;
+    }
+    
+    ModeRetval Perform(IShipAPI& api)
+    {
+        if (judgeNear(myself.me.x, myself.me.y, THUAI7::PlaceType::Resource))
+        {
+            if (api.GetResourceState(myself.TargetPos.x, myself.TargetPos.y))
+            {
+                if (myself.me.shipState != THUAI7::ShipState::Producing)
+                {
+                    api.EndAllAction();
+                    api.Produce();
+                }
+
+                return {
+                    PRODUCE,
+                    false
+                };
+            }
+            else
+            {
+                MapInfo::PositionLists[MapInfo::Resource].erase(std::find(MapInfo::PositionLists[MapInfo::Resource].begin(), MapInfo::PositionLists[MapInfo::Resource].end(), myself.TargetPos));
+                if (GetNearestResource(api))
+                {
+                    return {
+                        ROADSEARCH,
+                        true
+                    };
+                }
+                else
+                {
+                    return {
+                        IDLE,
+                        false
+                    };
+                }
+            }
+
+        }
+        else
+        {
+            if (GetNearestResource(api))
+            {
+                return {
+                    ROADSEARCH,
+                    true
+                };
+            }
+            else
+            {
+                return {
+                    IDLE,
+                    false
+                };
+            }
+        }
+    }
+
+    void Clear(IShipAPI& api)
+    {
+
+    }
+}
+
+
+ModeRetval (*perform_list[3])(IShipAPI&) = {&(IdleMode::Perform), &(RoadSearchMode::Perform), &(ProduceMode::Perform)};
+
+
+//bool moved = false;
+
+
+
+
+
 //coordinate GetNearestResource(int x1, int y1, THUAI7::PlaceType type, IShipAPI& api)
 //{
 //    int min_dis = 0x7fffffff, index = MapInfo::getIndex(type);
@@ -1350,15 +1705,6 @@ enum class shipState
 };
 shipState this_state;  //= shipState::produce;
 THUAI7::ConstructionType construction_type;
-bool judgeNear(int x, int y, THUAI7::PlaceType t)
-{
-    x = x / 1000, y = y / 1000;
-    if (MapInfo::map[x - 1][y] == t or MapInfo::map[x][y - 1] == t or MapInfo::map[x + 1][y] == t or MapInfo::map[x][y + 1] == t)
-    {
-        return true;
-    }
-    return false;
-};
 
 //class MyPath
 //{
@@ -1637,7 +1983,7 @@ ShipBT::rootNode* shipTreeList[9];
 void AI::play(IShipAPI& api)
 {
     Communication::RefreshInfo(api);
-
+    myself.me = *(api.GetSelfInfo());
 
 
      //if (myself.mode!=cur_Mode)
