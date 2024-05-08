@@ -128,13 +128,6 @@ namespace Commute
     constexpr size_t BUFFER_SIZE = sizeof(Commute::Buffer);
     using bytePointer = unsigned char*;
 }
-namespace Conditions
-{
-}
-namespace HomeAction
-{
-
-}
 namespace HomeInfo
 {
     enum Side
@@ -154,6 +147,7 @@ namespace HomeInfo
 
     coordinate MyHomePos, EnemyHomePos;
 
+    // 为什么不用shared_ptr<const THUAI7::Ship>?
     std::vector<THUAI7::Ship> MyShips, EnemyShips, EnemyShipsInSight;
 
     /**
@@ -359,6 +353,67 @@ namespace TeamBT
     };
 
     /**
+     * @class eventNode
+     * @brief 事件节点，当条件为真执行事件，并储存事件执行状态；否则节点状态为FAIL
+     * @param condition 返回是否执行的布尔值的条件函数
+     * @param action 待执行的操作对应的函数
+     *
+     */
+    class eventNode
+    {
+    public:
+        NodeState state;
+        std::function<bool(ITeamAPI& api)> condition;    ///< 执行条件
+        std::optional<std::function<bool(ITeamAPI& api)>> judgeSuccess;  ///< 补充用来判断是否成功的函数
+        std::function<NodeState(ITeamAPI& api)> action;  ///< 待执行的函数
+        eventNode(std::function<bool(ITeamAPI& api)> c, std::function<NodeState(ITeamAPI& api)> a) :
+            condition(c),
+            action(a),
+            state(IDLE),
+            judgeSuccess(std::nullopt)
+        {}
+        eventNode(std::function<bool(ITeamAPI& api)> c, std::function<NodeState(ITeamAPI& api)> a, std::function<bool(ITeamAPI& api)> jf):
+            condition(c),
+            action(a),
+            state(IDLE),
+            judgeSuccess(jf)
+        {}
+
+        NodeState perform(ITeamAPI& api)
+        {
+//            switch (state)
+//            {
+//                case IDLE:
+//                    state = RUNNING;
+//                    break;
+//                case RUNNING:
+//                    break;
+//                default:
+//                    return state;
+//                    break;
+//            }
+
+            if (condition(api))
+            {
+                state = action(api);
+            }
+            else if (judgeSuccess.has_value() and judgeSuccess.value()(api))
+            {
+				state = SUCCESS;
+            }
+            else
+            {
+                state = FAIL;
+            }
+
+            return state;
+        }
+
+        ~eventNode()
+        {
+        }
+    };
+    /**
      * @class baseNode
      * @brief 提供行为树节点的基本内容
      * @see NodeState
@@ -372,65 +427,10 @@ namespace TeamBT
             state(x)
         {
         }
-
-        virtual NodeState perform(ITeamAPI& api)
-        {
-            return IDLE;
-        }
-
-        virtual ~baseNode()
-        {
-        }
+        virtual NodeState perform(ITeamAPI& api) = 0;
+        virtual ~baseNode(){}
     };
 
-    /**
-     * @class eventNode
-     * @brief 事件节点，当条件为真执行事件，并储存事件执行状态；否则节点状态为FAIL
-     * @param condition 返回是否执行的布尔值的条件函数
-     * @param action 待执行的操作对应的函数
-     *
-     */
-    class eventNode : public baseNode
-    {
-    public:
-        std::function<bool(ITeamAPI& api)> condition;    ///< 执行条件
-        std::function<NodeState(ITeamAPI& api)> action;  ///< 待执行的函数
-        eventNode(std::function<bool(ITeamAPI& api)> c, std::function<NodeState(ITeamAPI& api)> a) :
-            condition(c),
-            action(a)
-        {
-        }
-
-        virtual NodeState perform(ITeamAPI& api) override
-        {
-            switch (state)
-            {
-                case IDLE:
-                    state = RUNNING;
-                    break;
-                case RUNNING:
-                    break;
-                default:
-                    return state;
-                    break;
-            }
-
-            if (condition(api))
-            {
-                state = action(api);
-            }
-            else
-            {
-                state = FAIL;
-            }
-
-            return state;
-        }
-
-        virtual ~eventNode()
-        {
-        }
-    };
 
     /**
      * @class SequenceNode
@@ -440,7 +440,7 @@ namespace TeamBT
     class SequenceNode : public baseNode
     {
     private:
-        inline void RewindChildren()
+        inline void ResetChildren()
         {
             for (size_t i = 0; i < events.size(); i++)
             {
@@ -450,8 +450,8 @@ namespace TeamBT
         }
 
     public:
-        std::vector<baseNode*> events;
-        int curChild;
+        std::vector<eventNode*> events;
+        int curChild = 0;
 
         /**
          * @brief 队列节点的perform函数\n
@@ -461,18 +461,18 @@ namespace TeamBT
          */
         virtual NodeState perform(ITeamAPI& api)
         {
-            switch (state)
-            {
-                case IDLE:
-                    state = RUNNING;
-                    break;
-                case RUNNING:
-                    break;
-                default:
-                    return state;
-                    break;
-            }
-
+//            switch (state)
+//            {
+//                case IDLE:
+//                    state = RUNNING;
+//                    break;
+//                case RUNNING:
+//                    break;
+//                default:
+//                    return state;
+//                    break;
+//            }
+            state = RUNNING;
             switch (events[curChild]->perform(api))
             {
                 case RUNNING:
@@ -481,7 +481,7 @@ namespace TeamBT
                     if (curChild == events.size() - 1)
                     {
                         state = SUCCESS;
-                        RewindChildren();
+                        ResetChildren();
                     }
                     else
                     {
@@ -490,14 +490,15 @@ namespace TeamBT
                     break;
                 case FAIL:
                     state = FAIL;
-                    RewindChildren();
+//                    ResetChildren();
                     break;
                 default:
                     break;
             }
+            std::cout << curChild << std::endl;
             return state;
         }
-        SequenceNode(std::initializer_list<baseNode*> l) :
+        SequenceNode(std::initializer_list<eventNode*> l) :
             events(l),
             curChild(0)
         {
@@ -616,10 +617,11 @@ namespace TeamBT
     /**
      * @brief 选择器节点，依次尝试每个子节点，直到有一个成功或全部失败
      */
+    /*
     class fallbackNode : public baseNode
     {
     private:
-        inline void RewindChildren()
+        inline void ResetChildren()
         {
             for (size_t i = 0; i < events.size(); i++)
             {
@@ -631,7 +633,7 @@ namespace TeamBT
     public:
         std::vector<baseNode*> events;
         int curChild;
-
+*/
         /**
          * @brief 选择器节点的perform函数
          * - 如果当前子节点返回SUCCESS，则重置全部子节点状态，本节点状态设为SUCCESS并返回SUCCESS
@@ -641,7 +643,8 @@ namespace TeamBT
          *  . 否则下一次调用执行下一个子节点，本次返回RUNNING
          * @param api
          * @return
-         */
+     */
+    /*
         virtual NodeState perform(ITeamAPI& api)
         {
             switch (state)
@@ -664,7 +667,7 @@ namespace TeamBT
                     if (curChild == events.size() - 1)
                     {
                         state = FAIL;
-                        RewindChildren();
+                        ResetChildren();
                     }
                     else
                     {
@@ -673,7 +676,7 @@ namespace TeamBT
                     break;
                 case SUCCESS:
                     state = SUCCESS;
-                    RewindChildren();
+                    ResetChildren();
                     break;
                 default:
                     break;
@@ -704,7 +707,7 @@ namespace TeamBT
                 events[i] = NULL;
             }
         }
-    };
+    };*/
 
 }
 
@@ -815,7 +818,7 @@ namespace ShipBT
     class SequenceNode : public baseNode
     {
     private:
-        inline void RewindChildren()
+        inline void ResetChildren()
         {
             for (size_t i = 0; i < events.size(); i++)
             {
@@ -856,7 +859,7 @@ namespace ShipBT
                     if (curChild == events.size() - 1)
                     {
                         state = SUCCESS;
-                        RewindChildren();
+                        ResetChildren();
                     }
                     else
                     {
@@ -865,7 +868,7 @@ namespace ShipBT
                     break;
                 case FAIL:
                     state = FAIL;
-                    RewindChildren();
+                    ResetChildren();
                     break;
                 default:
                     break;
@@ -1016,7 +1019,7 @@ namespace ShipBT
     class fallbackNode : public baseNode
     {
     private:
-        inline void RewindChildren()
+        inline void ResetChildren()
         {
             for (size_t i = 0; i < events.size(); i++)
             {
@@ -1061,7 +1064,7 @@ namespace ShipBT
                     if (curChild == events.size() - 1)
                     {
                         state = FAIL;
-                        RewindChildren();
+                        ResetChildren();
                     }
                     else
                     {
@@ -1070,7 +1073,7 @@ namespace ShipBT
                     break;
                 case SUCCESS:
                     state = SUCCESS;
-                    RewindChildren();
+                    ResetChildren();
                     break;
                 default:
                     break;
@@ -1158,7 +1161,12 @@ namespace Conditions
         return [threshold](ITeamAPI& api)
         { return (api.GetEnergy() >= threshold); };
     }
-}  // namespace Conditions
+    auto ShipNumThreshold(int threshold)
+    {
+		return [threshold](ITeamAPI& api)
+        { return (api.GetShips().size() >= threshold); };
+	}
+}  
 
 namespace HomeAction
 {
@@ -1207,16 +1215,16 @@ namespace HomeAction
          SetShipMode(unsigned char ShipID, ShipMode mode) : shipID(ShipID), mode(mode){
          }
             TeamBT::NodeState operator()(ITeamAPI& api){
-                int count = 0;
-                while (shipID)
+                int count = 0, id = shipID;
+                while (id)
                 {
-                    int tmp = shipID & 1;
+                    int tmp = id & 1;
                     if (tmp)
                     {
                         HomeInfo::TeamShipBuffer[count].Mode = mode;
                     }
                     count++;
-                    shipID >>= 1;
+                    id >>= 1;
                 }
                 return TeamBT::SUCCESS;
             }
@@ -1315,7 +1323,7 @@ namespace Commute
             int index = players[i]->playerID;
             std::string message;
             message.resize(BUFFER_SIZE + 1);
-            memcpy(message.data(), &HomeInfo::TeamShipBuffer[index], BUFFER_SIZE);
+            memcpy(message.data(), &HomeInfo::TeamShipBuffer[i], BUFFER_SIZE);
             //message[BUFFER_SIZE] = '\0';
             api.SendBinaryMessage(index, message);
         }
@@ -1325,6 +1333,7 @@ namespace Commute
 
 namespace HomeInfo
 {
+    int first_id;
     void CheckInfo(ITeamAPI& api)
     {
         //初始化地图并确定我方颜色
@@ -1350,6 +1359,7 @@ namespace HomeInfo
             }
             if (init)
             {
+                first_id = MyShips[0].playerID;
                 coordinate tmp(MyShips[0].x / 1000, MyShips[0].y/1000);
                 for (size_t i = 0; i < 2; i++)
                 {
@@ -1790,7 +1800,7 @@ namespace ProduceMode
 
 
 
-ModeRetval (*perform_list[3])(IShipAPI&) = {&(IdleMode::Perform), &(RoadSearchMode::Perform), &(ProduceMode::Perform)};
+//ModeRetval (*perform_list[3])(IShipAPI&) = {&(IdleMode::Perform), &(RoadSearchMode::Perform), &(ProduceMode::Perform)};
 void (*clear_list[3])(IShipAPI&) = {&(IdleMode::Clear), &(RoadSearchMode::Clear), &(ProduceMode::Clear)};
 
 
@@ -1809,9 +1819,9 @@ void AI::play(IShipAPI& api)
         
         if (ShipInfo::myself.mode!=ShipInfo::ShipBuffer.Mode)
         {
-            for (size_t i = 0; i < sizeof(clear_list) / sizeof(clear_list[0]); i++)
+            for (auto const& clear : clear_list)
             {
-                clear_list[i];
+                clear(api);
             }
             nextMode = ShipInfo::myself.mode = ShipInfo::ShipBuffer.Mode;
             switch (ShipInfo::ShipBuffer.Mode)
@@ -1829,34 +1839,48 @@ void AI::play(IShipAPI& api)
 
     switch (nextMode)
     {
-        case IDLE:
-            ModeRetval res1 = perform_list[0](api);
-            nextMode = res1.mode;
-            break;
-        case ATTACK:
-            break;
-        case REVENGE:
-            break;
-        case HIDE:
-            break;
-        case PRODUCE:
-            ModeRetval res2 = perform_list[2](api);
-            nextMode = res2.mode;
-            break;
-        case CONSTRUCT:
-            break;
-        case ROB:
-            break;
-        case RUIN:
-            break;
-        case FOLLOW:
-            break;
-        case ROADSEARCH:
-            ModeRetval res3 = perform_list[1](api);
-            nextMode = res3.mode;
-            break;
-        default:
-            break;
+        if (nextMode == IDLE){
+            ModeRetval res = IdleMode::Perform(api);
+            nextMode = res.mode;
+        }
+        else if (nextMode == ATTACK)
+        {
+        
+        }
+        else if (nextMode == REVENGE)
+        {
+		
+		}
+        else if (nextMode == HIDE)
+        {
+		
+		}
+        else if (nextMode == PRODUCE)
+        {
+			ModeRetval res = ProduceMode::Perform(api);
+			nextMode = res.mode;
+		}
+        else if (nextMode == CONSTRUCT)
+        {
+		
+		}
+        else if (nextMode == ROB)
+        {
+		
+		}
+        else if (nextMode == RUIN)
+        {
+		
+		}
+        else if (nextMode == FOLLOW)
+        {
+		
+		}
+        else if (nextMode == ROADSEARCH)
+        {
+			ModeRetval res = RoadSearchMode::Perform(api);
+			nextMode = res.mode;
+		}
     }
     
      //if (myself.mode!=cur_Mode)
@@ -1890,13 +1914,22 @@ bool BuildSecondCivil = false;
 volatile int Ind = 2;
 
 TeamBT::SequenceNode root = {
-    //new TeamBT::AlwaysSuccessNode(new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(1,PRODUCE)})),
-    //new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3)})),
-    //new TeamBT::AlwaysSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip)})),
-    //new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip)})),
+        /*
+    new TeamBT::AlwaysSuccessNode(new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(1,PRODUCE)})),
+    new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3)})),
+    new TeamBT::AlwaysSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip)})),
+    new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip)})),
     new TeamBT::AlwaysSuccessNode(new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(SHIP_1|SHIP_2, PRODUCE)}))
-    //new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)})),
-    //new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)}))
+    new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)})),
+    new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)}))
+         */
+    new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(1,PRODUCE)}),
+    new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3)}),
+    new TeamBT::eventNode({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipNumThreshold(2)}),
+    new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(SHIP_1|SHIP_2, PRODUCE)}),
+    new TeamBT::eventNode({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(3)}),
+    new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)}),
+    new TeamBT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)})
 };
 
 
@@ -1917,6 +1950,10 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
 {
 
     HomeInfo::CheckInfo(api);
+    if (HomeInfo::first_id != 1)
+    {
+        root.events[0] = new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(1 << (HomeInfo::first_id - 1),PRODUCE)});
+    }
     root.perform(api);
     Commute::sync_ships(api);
     //api.SendTextMessage(1, "hello");
