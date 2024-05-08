@@ -119,13 +119,13 @@ namespace Commute
     {
         int playerID;
         ShipMode Mode;
-        bool SpecifyTarget;
+        bool SpecifyTarget = false;
         coordinate target;
-        bool with_param;
+        bool with_param = false;
         size_t param;
     };
 
-    const size_t BUFFER_SIZE = sizeof(Commute::Buffer);
+    constexpr size_t BUFFER_SIZE = sizeof(Commute::Buffer);
     using bytePointer = unsigned char*;
 }
 namespace Conditions
@@ -224,6 +224,9 @@ namespace ShipInfo
 
     /**
     * @brief 自身的信息
+    * @param mode ShipMode
+    * @param myself THUAI7::Ship
+    * @param TargetPos coordinate
     */
     ShipMem myself;
 
@@ -248,14 +251,6 @@ namespace ShipInfo
      */
     int init = 1;
 }
-namespace TeamBT
-{
-}
-
-
-
-
-
 
 namespace MapInfo
 {
@@ -348,8 +343,6 @@ inline int manhatten_distance(int x1, int y1, coordinate c)
 };
 
 
-
-
 namespace TeamBT
 {
 
@@ -366,16 +359,16 @@ namespace TeamBT
     };
 
     /**
-     * @class rootNode
+     * @class baseNode
      * @brief 提供行为树节点的基本内容
      * @see NodeState
      */
-    class rootNode
+    class baseNode
     {
     public:
         NodeState state;
 
-        rootNode(NodeState x = IDLE) :
+        baseNode(NodeState x = IDLE) :
             state(x)
         {
         }
@@ -385,7 +378,7 @@ namespace TeamBT
             return IDLE;
         }
 
-        virtual ~rootNode()
+        virtual ~baseNode()
         {
         }
     };
@@ -397,7 +390,7 @@ namespace TeamBT
      * @param action 待执行的操作对应的函数
      *
      */
-    class eventNode : public rootNode
+    class eventNode : public baseNode
     {
     public:
         std::function<bool(ITeamAPI& api)> condition;    ///< 执行条件
@@ -408,7 +401,7 @@ namespace TeamBT
         {
         }
 
-        virtual NodeState perform(ITeamAPI& api)
+        virtual NodeState perform(ITeamAPI& api) override
         {
             switch (state)
             {
@@ -444,7 +437,7 @@ namespace TeamBT
      * @brief 队列节点，依次执行子节点，直到节点返回结果为FAIL或全部子节点都被执行完
      * @param state 与最后一个执行的子节点的状态相同
      */
-    class SequenceNode : public rootNode
+    class SequenceNode : public baseNode
     {
     private:
         inline void RewindChildren()
@@ -457,7 +450,7 @@ namespace TeamBT
         }
 
     public:
-        std::vector<rootNode*> events;
+        std::vector<baseNode*> events;
         int curChild;
 
         /**
@@ -504,7 +497,7 @@ namespace TeamBT
             }
             return state;
         }
-        SequenceNode(std::initializer_list<rootNode*> l) :
+        SequenceNode(std::initializer_list<baseNode*> l) :
             events(l),
             curChild(0)
         {
@@ -533,12 +526,12 @@ namespace TeamBT
      * @brief 节点功能：反复执行子节点，直到返回SUCCESS
      *
      */
-    class TryUntilSuccessNode : public rootNode
+    class TryUntilSuccessNode : public baseNode
     {
     public:
-        rootNode* child;
-        TryUntilSuccessNode(rootNode* x) :
-            rootNode(RUNNING),
+        baseNode* child;
+        TryUntilSuccessNode(baseNode* x) :
+            baseNode(RUNNING),
             child(x)
         {
         }
@@ -582,12 +575,12 @@ namespace TeamBT
     /**
      * @brief decorator节点，执行一次子节点，不论子节点返回值如何，均返回SUCCESS
      */
-    class AlwaysSuccessNode : public rootNode
+    class AlwaysSuccessNode : public baseNode
     {
     public:
-        rootNode* child;  ///< 要执行的子节点
-        AlwaysSuccessNode(rootNode* x) :
-            rootNode(IDLE),
+        baseNode* child;  ///< 要执行的子节点
+        AlwaysSuccessNode(baseNode* x) :
+            baseNode(IDLE),
             child(x)
         {
         }
@@ -623,7 +616,7 @@ namespace TeamBT
     /**
      * @brief 选择器节点，依次尝试每个子节点，直到有一个成功或全部失败
      */
-    class fallbackNode : public rootNode
+    class fallbackNode : public baseNode
     {
     private:
         inline void RewindChildren()
@@ -636,7 +629,7 @@ namespace TeamBT
         }
 
     public:
-        std::vector<rootNode*> events;
+        std::vector<baseNode*> events;
         int curChild;
 
         /**
@@ -688,7 +681,7 @@ namespace TeamBT
             return state;
         }
 
-        fallbackNode(std::initializer_list<rootNode*> l) :
+        fallbackNode(std::initializer_list<baseNode*> l) :
             events(l),
             curChild(0)
         {
@@ -735,12 +728,12 @@ namespace ShipBT
      * @brief 提供行为树节点的基本内容
      * @see NodeState
      */
-    class rootNode
+    class baseNode
     {
     public:
         NodeState state;
 
-        rootNode(NodeState x = IDLE) :
+        baseNode(NodeState x = IDLE) :
             state(x)
         {
         }
@@ -755,7 +748,7 @@ namespace ShipBT
             state = IDLE;
         }
 
-        virtual ~rootNode()
+        virtual ~baseNode()
         {
         }
     };
@@ -767,7 +760,7 @@ namespace ShipBT
      * @param action 待执行的操作对应的函数
      *
      */
-    class eventNode : public rootNode
+    class eventNode : public baseNode
     {
     public:
         std::function<bool(IShipAPI& api)> condition;    ///< 执行条件
@@ -819,7 +812,7 @@ namespace ShipBT
      * @brief 队列节点，依次执行子节点，直到节点返回结果为FAIL或全部子节点都被执行完
      * @param state 与最后一个执行的子节点的状态相同
      */
-    class SequenceNode : public rootNode
+    class SequenceNode : public baseNode
     {
     private:
         inline void RewindChildren()
@@ -832,7 +825,7 @@ namespace ShipBT
         }
 
     public:
-        std::vector<rootNode*> events;
+        std::vector<baseNode*> events;
         int curChild;
 
         /**
@@ -889,7 +882,7 @@ namespace ShipBT
             }
         }
 
-        SequenceNode(std::initializer_list<rootNode*> l) :
+        SequenceNode(std::initializer_list<baseNode*> l) :
             events(l),
             curChild(0)
         {
@@ -918,12 +911,12 @@ namespace ShipBT
      * @brief 节点功能：反复执行子节点，直到返回SUCCESS
      *
      */
-    class TryUntilSuccessNode : public rootNode
+    class TryUntilSuccessNode : public baseNode
     {
     public:
-        rootNode* child;
-        TryUntilSuccessNode(rootNode* x) :
-            rootNode(RUNNING),
+        baseNode* child;
+        TryUntilSuccessNode(baseNode* x) :
+            baseNode(RUNNING),
             child(x)
         {
         }
@@ -973,12 +966,12 @@ namespace ShipBT
     /**
      * @brief decorator节点，执行一次子节点，不论子节点返回值如何，均返回SUCCESS
      */
-    class AlwaysSuccessNode : public rootNode
+    class AlwaysSuccessNode : public baseNode
     {
     public:
-        rootNode* child;  ///< 要执行的子节点
-        AlwaysSuccessNode(rootNode* x) :
-            rootNode(IDLE),
+        baseNode* child;  ///< 要执行的子节点
+        AlwaysSuccessNode(baseNode* x) :
+            baseNode(IDLE),
             child(x)
         {
         }
@@ -1020,7 +1013,7 @@ namespace ShipBT
     /**
      * @brief 选择器节点，依次尝试每个子节点，直到有一个成功或全部失败
      */
-    class fallbackNode : public rootNode
+    class fallbackNode : public baseNode
     {
     private:
         inline void RewindChildren()
@@ -1033,7 +1026,7 @@ namespace ShipBT
         }
 
     public:
-        std::vector<rootNode*> events;
+        std::vector<baseNode*> events;
         int curChild;
 
         /**
@@ -1094,7 +1087,7 @@ namespace ShipBT
             }
         }
 
-        fallbackNode(std::initializer_list<rootNode*> l) :
+        fallbackNode(std::initializer_list<baseNode*> l) :
             events(l),
             curChild(0)
         {
@@ -1207,6 +1200,28 @@ namespace HomeAction
      * @param mode 
      * @return 
      */
+     class SetShipMode{
+         unsigned char shipID;
+         ShipMode mode;
+     public:
+         SetShipMode(unsigned char ShipID, ShipMode mode) : shipID(ShipID), mode(mode){
+         }
+            TeamBT::NodeState operator()(ITeamAPI& api){
+                int count = 0;
+                while (shipID)
+                {
+                    int tmp = shipID & 1;
+                    if (tmp)
+                    {
+                        HomeInfo::TeamShipBuffer[count].Mode = mode;
+                    }
+                    count++;
+                    shipID >>= 1;
+                }
+                return TeamBT::SUCCESS;
+            }
+     };
+    /*
     auto SetShipMode(unsigned char ShipID, ShipMode mode)
     {
         return [&](ITeamAPI& api)
@@ -1226,7 +1241,7 @@ namespace HomeAction
             return TeamBT::SUCCESS;
         };
 
-    }
+    }*/
 }
 
 namespace Attack
@@ -1235,14 +1250,6 @@ namespace Attack
     ShipFSM::State Shoot;
     ShipFSM::State Hide;
     ShipFSM::State Approach;
-
-
-
-
-
-
-
-
 }
 
 
@@ -1291,12 +1298,8 @@ namespace Commute
         }
         else
         {
-
             std::string mes = (api.GetMessage()).second;
             memcpy(&ShipInfo::ShipBuffer, mes.data(), sizeof(Buffer));
-
-
-            
             return true;
         }
     }
@@ -1309,12 +1312,12 @@ namespace Commute
         auto players = api.GetShips();
         for (size_t i = 0; i < players.size(); i++)
         {
-            int ind = players[i]->playerID;
+            int index = players[i]->playerID;
             std::string message;
-            message.resize(sizeof(Buffer) + 1);
-            memcpy(message.data(), &HomeInfo::TeamShipBuffer[i], sizeof(Buffer));
-            message[BUFFER_SIZE] = '\0';
-            api.SendBinaryMessage(ind, message);
+            message.resize(BUFFER_SIZE + 1);
+            memcpy(message.data(), &HomeInfo::TeamShipBuffer[index], BUFFER_SIZE);
+            //message[BUFFER_SIZE] = '\0';
+            api.SendBinaryMessage(index, message);
         }
     }
 
@@ -1473,160 +1476,6 @@ namespace ShipInfo
 }
 
 
-//std::deque<coordinate> search_road(int x1, int y1, int x2, int y2)
-//{
-//    std::priority_queue<node> pq;
-//    pq.push({x1, y1, coordinate{-1, -1}, 0, (double)manhatten_distance(x1, y1, x2, y2)});
-//    memset(visited, false, sizeof(visited));
-//    while (!pq.empty())
-//    {
-//        node now = pq.top();
-//        pq.pop();
-//        if (visited[now.x][now.y])
-//            continue;
-//        visited[now.x][now.y] = true;
-//        from[now.x][now.y] = now.from;
-//        if (now.x == x2 && now.y == y2)
-//        {
-//            std::deque<coordinate> path;
-//            path.push_back({now.x, now.y});
-//            coordinate temp = now.from;
-//            while (temp.x != -1)
-//            {
-//                path.push_front({temp.x, temp.y});
-//                temp = from[temp.x][temp.y];
-//            }
-//            path.pop_front();
-//            return path;
-//        }
-//        auto is_empty = [](THUAI7::PlaceType t)
-//        {
-//            return t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole;
-//        };
-//        for (int i = -1; i <= 1; i++)
-//        {
-//            for (int j = -1; j <= 1; j++)
-//            {
-//                if (i == 0 and j == 0)
-//                    continue;
-//                if (i == -1 and j == -1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
-//                    continue;
-//                if (i == 1 and j == -1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
-//                    continue;
-//                if (i == -1 and j == 1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
-//                    continue;
-//                if (i == 1 and j == 1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
-//                    continue;
-//                int nx = now.x + i, ny = now.y + j;
-//                if (nx < 0 or nx >= 50 or ny < 0 or ny >= 50 or visited[nx][ny])
-//                    continue;
-//                if (nx == x2 and ny == y2)
-//                {
-//                    double cost = sqrt(i * i + j * j);
-//                    pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, 0});
-//                }
-//                THUAI7::PlaceType t = MapInfo::map[nx][ny];
-//                if (t != THUAI7::PlaceType::Space and t != THUAI7::PlaceType::Shadow and t != THUAI7::PlaceType::Wormhole)
-//                    continue;
-//                double cost = sqrt(i * i + j * j);
-//                int h = manhatten_distance(nx, ny, x2, y2);
-//                pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, (double)h});
-//            }
-//        }
-//    }
-//}
-//std::deque<coordinate> search_road(int x1, int y1, THUAI7::PlaceType type, IShipAPI& api)
-//{
-//    int min_dis = 0x7fffffff, index = MapInfo::getIndex(type);
-//    auto& des = MapInfo::des_list[index];
-//    for (auto i = des.begin(); i != des.end();)
-//    {
-//        if (type == THUAI7::PlaceType::Resource)
-//        {
-//            std::cout << "x: " << (*i).x << " y: " << (*i).y << std::endl;
-//            int temp = api.GetResourceState((*i).x, (*i).y);
-//            if (temp == 0)
-//            {
-//                i = des.erase(i);
-//                continue;
-//            }
-//        }
-//        else if (type == THUAI7::PlaceType::Construction and api.GetConstructionHp((*i).x, (*i).y) > 0)
-//        {
-//            i = des.erase(i);
-//            continue;
-//        }
-//        int temp = manhatten_distance(x1, y1, *i);
-//        if (temp < min_dis)
-//            min_dis = temp;
-//        i++;
-//    }
-//    std::priority_queue<node> pq;
-//    pq.push({x1, y1, coordinate{-1, -1}, 0, (double)min_dis});
-//    memset(visited, false, sizeof(visited));
-//    while (!pq.empty())
-//    {
-//        node now = pq.top();
-//        pq.pop();
-//        if (visited[now.x][now.y])
-//            continue;
-//        visited[now.x][now.y] = true;
-//        from[now.x][now.y] = now.from;
-//        if (des.find({now.x, now.y}) != des.end())
-//        {
-//            std::deque<coordinate> path;
-//            path.push_back({now.x, now.y});
-//            coordinate temp = now.from;
-//            while (temp.x != -1)
-//            {
-//                path.push_front({temp.x, temp.y});
-//                temp = from[temp.x][temp.y];
-//            }
-//            path.pop_front();
-//            return path;
-//        }
-//        auto is_empty = [](THUAI7::PlaceType t)
-//        {
-//            return t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole;
-//        };
-//        for (int i = -1; i <= 1; i++)
-//        {
-//            for (int j = -1; j <= 1; j++)
-//            {
-//                if (i == 0 and j == 0)
-//                    continue;
-//                if (i == -1 and j == -1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
-//                    continue;
-//                if (i == 1 and j == -1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
-//                    continue;
-//                if (i == -1 and j == 1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
-//                    continue;
-//                if (i == 1 and j == 1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
-//                    continue;
-//                int nx = now.x + i, ny = now.y + j;
-//                if (nx < 0 or nx >= 50 or ny < 0 or ny >= 50 or visited[nx][ny])
-//                    continue;
-//                if (des.find({nx, ny}) != des.end() and (i == 0 or j == 0))
-//                {
-//                    double cost = sqrt(i * i + j * j);
-//                    pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, 0});
-//                }
-//                THUAI7::PlaceType t = MapInfo::map[nx][ny];
-//                if (t != THUAI7::PlaceType::Space and t != THUAI7::PlaceType::Shadow and t != THUAI7::PlaceType::Wormhole)
-//                    continue;
-//                double cost = sqrt(i * i + j * j);
-//                min_dis = 0x7fffffff;
-//                for (auto const& k : des)
-//                {
-//                    int temp = manhatten_distance(x1, y1, k);
-//                    if (temp < min_dis)
-//                        min_dis = temp;
-//                }
-//                pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, (double)min_dis});
-//            }
-//        }
-//    }
-//}
 
 namespace IdleMode
 {
@@ -1956,9 +1805,7 @@ void AI::play(IShipAPI& api)
     if (Commute::RefreshInfo(api))
     {
         std::cout << "Success\n"
-                  << (ShipInfo::ShipBuffer.Mode == PRODUCE) ?
-            "PRODUCE\n" :
-            "NO!!!\n";
+                  << ((ShipInfo::ShipBuffer.Mode == PRODUCE) ? "PRODUCE\n" : "NO!!!\n");
         
         if (ShipInfo::myself.mode!=ShipInfo::ShipBuffer.Mode)
         {
@@ -1974,11 +1821,11 @@ void AI::play(IShipAPI& api)
             }
         }
     }
-
+    /*
     if (Ship_Init)
     {
         nextMode = IDLE;
-    }
+    }*/
 
     switch (nextMode)
     {
@@ -2152,3 +1999,159 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
         api.Produce();
         moved = true;
         }*/
+/*
+std::deque<coordinate> search_road(int x1, int y1, int x2, int y2)
+{
+    std::priority_queue<node> pq;
+    pq.push({x1, y1, coordinate{-1, -1}, 0, (double)manhatten_distance(x1, y1, x2, y2)});
+    memset(visited, false, sizeof(visited));
+    while (!pq.empty())
+    {
+        node now = pq.top();
+        pq.pop();
+        if (visited[now.x][now.y])
+            continue;
+        visited[now.x][now.y] = true;
+        from[now.x][now.y] = now.from;
+        if (now.x == x2 && now.y == y2)
+        {
+            std::deque<coordinate> path;
+            path.push_back({now.x, now.y});
+            coordinate temp = now.from;
+            while (temp.x != -1)
+            {
+                path.push_front({temp.x, temp.y});
+                temp = from[temp.x][temp.y];
+            }
+            path.pop_front();
+            return path;
+        }
+        auto is_empty = [](THUAI7::PlaceType t)
+        {
+            return t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole;
+        };
+        for (int i = -1; i <= 1; i++)
+        {
+            for (int j = -1; j <= 1; j++)
+            {
+                if (i == 0 and j == 0)
+                    continue;
+                if (i == -1 and j == -1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
+                    continue;
+                if (i == 1 and j == -1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
+                    continue;
+                if (i == -1 and j == 1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
+                    continue;
+                if (i == 1 and j == 1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
+                    continue;
+                int nx = now.x + i, ny = now.y + j;
+                if (nx < 0 or nx >= 50 or ny < 0 or ny >= 50 or visited[nx][ny])
+                    continue;
+                if (nx == x2 and ny == y2)
+                {
+                    double cost = sqrt(i * i + j * j);
+                    pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, 0});
+                }
+                THUAI7::PlaceType t = MapInfo::map[nx][ny];
+                if (t != THUAI7::PlaceType::Space and t != THUAI7::PlaceType::Shadow and t != THUAI7::PlaceType::Wormhole)
+                    continue;
+                double cost = sqrt(i * i + j * j);
+                int h = manhatten_distance(nx, ny, x2, y2);
+                pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, (double)h});
+            }
+        }
+    }
+}
+std::deque<coordinate> search_road(int x1, int y1, THUAI7::PlaceType type, IShipAPI& api)
+{
+    int min_dis = 0x7fffffff, index = MapInfo::getIndex(type);
+    auto& des = MapInfo::des_list[index];
+    for (auto i = des.begin(); i != des.end();)
+    {
+        if (type == THUAI7::PlaceType::Resource)
+        {
+            std::cout << "x: " << (*i).x << " y: " << (*i).y << std::endl;
+            int temp = api.GetResourceState((*i).x, (*i).y);
+            if (temp == 0)
+            {
+                i = des.erase(i);
+                continue;
+            }
+        }
+        else if (type == THUAI7::PlaceType::Construction and api.GetConstructionHp((*i).x, (*i).y) > 0)
+        {
+            i = des.erase(i);
+            continue;
+        }
+        int temp = manhatten_distance(x1, y1, *i);
+        if (temp < min_dis)
+            min_dis = temp;
+        i++;
+    }
+    std::priority_queue<node> pq;
+    pq.push({x1, y1, coordinate{-1, -1}, 0, (double)min_dis});
+    memset(visited, false, sizeof(visited));
+    while (!pq.empty())
+    {
+        node now = pq.top();
+        pq.pop();
+        if (visited[now.x][now.y])
+            continue;
+        visited[now.x][now.y] = true;
+        from[now.x][now.y] = now.from;
+        if (des.find({now.x, now.y}) != des.end())
+        {
+            std::deque<coordinate> path;
+            path.push_back({now.x, now.y});
+            coordinate temp = now.from;
+            while (temp.x != -1)
+            {
+                path.push_front({temp.x, temp.y});
+                temp = from[temp.x][temp.y];
+            }
+            path.pop_front();
+            return path;
+        }
+        auto is_empty = [](THUAI7::PlaceType t)
+        {
+            return t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole;
+        };
+        for (int i = -1; i <= 1; i++)
+        {
+            for (int j = -1; j <= 1; j++)
+            {
+                if (i == 0 and j == 0)
+                    continue;
+                if (i == -1 and j == -1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
+                    continue;
+                if (i == 1 and j == -1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
+                    continue;
+                if (i == -1 and j == 1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
+                    continue;
+                if (i == 1 and j == 1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
+                    continue;
+                int nx = now.x + i, ny = now.y + j;
+                if (nx < 0 or nx >= 50 or ny < 0 or ny >= 50 or visited[nx][ny])
+                    continue;
+                if (des.find({nx, ny}) != des.end() and (i == 0 or j == 0))
+                {
+                    double cost = sqrt(i * i + j * j);
+                    pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, 0});
+                }
+                THUAI7::PlaceType t = MapInfo::map[nx][ny];
+                if (t != THUAI7::PlaceType::Space and t != THUAI7::PlaceType::Shadow and t != THUAI7::PlaceType::Wormhole)
+                    continue;
+                double cost = sqrt(i * i + j * j);
+                min_dis = 0x7fffffff;
+                for (auto const& k : des)
+                {
+                    int temp = manhatten_distance(x1, y1, k);
+                    if (temp < min_dis)
+                        min_dis = temp;
+                }
+                pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, (double)min_dis});
+            }
+        }
+    }
+}
+*/
