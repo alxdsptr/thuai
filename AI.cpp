@@ -38,6 +38,11 @@ extern const std::array<THUAI7::ShipType, 4> ShipTypeDict = {
 };
  
 // 可以在AI.cpp内部声明变量与函数
+enum Side
+{
+    RED = 0,
+    BLUE
+};
 
 struct coordinate
 {
@@ -130,11 +135,6 @@ namespace Commute
 }
 namespace HomeInfo
 {
-    enum Side
-    {
-        RED = 0,
-        BLUE
-    };
 
     int UsableShip[4] = {0};
     int MyScore = 0;
@@ -160,125 +160,70 @@ namespace HomeInfo
 
     void CheckInfo(ITeamAPI& api);
 }
-namespace IdleMode
-{
-}
+
 namespace MapInfo
 {
     enum Place
     {
         NullPlaceType = 0,
-        Home = 1,
-        Space = 2,
-        Ruin = 3,
-        Shadow = 4,
-        Asteroid = 5,
-        Resource = 6,
-        Construction = 7,
-        Wormhole = 8,
+        Space,
+        Ruin,
+        Shadow,
+        Asteroid,
+        Resource,
+        Construction,
+        MyHome,
+        EnemyHome,
+        OpenWormhole,
+        ClosedWormhole
     };
 
     /**
     * @brief 储存各类型格子的坐标的向量，其中资源只有在可能有剩余量的时候才会储存在其中
     */
-    std::vector<coordinate> PositionLists[9];
+    std::unordered_set<coordinate, PointHash> PositionLists[9];
 
 
     Place fullmap[50][50];
     THUAI7::PlaceType map[maxLen][maxLen];
 
-    std::unordered_set<coordinate, PointHash> des_list[4];
+//    std::unordered_set<coordinate, PointHash> des_list[4];
     coordinate home_pos, enemy_pos;
     bool hasGetMap = false;
+    Side MySide;
 
-    Place PlaceTypeConvert(THUAI7::PlaceType t);
-    int getIndex(THUAI7::PlaceType type);
-    template<class T>
-    void LoadFullMap(T& api);
-
-}
-namespace ProduceMode
-{
-}
-namespace RoadSearchMode
-{
-}
-namespace ShipInfo
-{
-
-    struct ShipMem
-    {
-        // THUAI7::Ship NearestEnemyShip;
-        ShipMode mode;
-        THUAI7::Ship me;
-        coordinate TargetPos;  //<注意为格子数，不是坐标值
-        // THUAI7::ConstructionType ConsType;
-        // const char end = '\0';
-    };
-
-    /**
-    * @brief 自身的信息
-    * @param mode ShipMode
-    * @param myself THUAI7::Ship
-    * @param TargetPos coordinate
-    */
-    ShipMem myself;
-
-    /**
-    * @brief 敌舰
-    */
-    std::vector<THUAI7::Ship> Enemies;
-
-
-    /**
-    * @brief 最近的敌舰
-    */
-    THUAI7::Ship NearestEnemy;
-
-    /**
-     * @brief 信息接收缓冲区
-     */
-    Commute::Buffer ShipBuffer;
-
-    /**
-     * @brief 是否是初始化状态
-     */
-    int init = 1;
-}
-
-namespace MapInfo
-{
-    Place PlaceTypeConvert(THUAI7::PlaceType t)
+    Place PlaceTypeConvert(THUAI7::PlaceType t, int x, int y)
     {
         switch (t)
         {
             case THUAI7::PlaceType::NullPlaceType:
                 return NullPlaceType;
-                break;
             case THUAI7::PlaceType::Home:
-                return Home;
-                break;
+                if ((x < 10 and MySide == RED) or (x >= 40 and MySide == BLUE))
+					return MyHome;
+				else
+					return EnemyHome;
             case THUAI7::PlaceType::Space:
                 return Space;
-                break;
             case THUAI7::PlaceType::Ruin:
                 return Ruin;
-                break;
             case THUAI7::PlaceType::Shadow:
                 return Shadow;
-                break;
             case THUAI7::PlaceType::Asteroid:
                 return Asteroid;
-                break;
             case THUAI7::PlaceType::Resource:
                 return Resource;
-                break;
             case THUAI7::PlaceType::Construction:
                 return Construction;
-                break;
             case THUAI7::PlaceType::Wormhole:
-                return Wormhole;
-                break;
+                if (y <= 15 or y >= 35)
+                {
+                    return OpenWormhole;
+                }
+                else
+                {
+                    return ClosedWormhole;
+                }
             default:
                 break;
         }
@@ -297,13 +242,16 @@ namespace MapInfo
     void LoadFullMap(T& api)
     {
         auto mp = api.GetFullMap();
+        auto self = api.GetSelfInfo();
+        self->teamID == 0 ? MySide = RED : MySide = BLUE;
         for (size_t i = 0; i < 50; i++)
         {
             for (size_t j = 0; j < 50; j++)
             {
                 map[i][j] = mp[i][j];
-                fullmap[i][j] = PlaceTypeConvert(mp[i][j]);
-                PositionLists[PlaceTypeConvert(mp[i][j])].push_back(coordinate(i, j));
+                fullmap[i][j] = PlaceTypeConvert(mp[i][j], i, j);
+                //PositionLists[PlaceTypeConvert(mp[i][j])].insert(coordinate(i, j));
+                PositionLists[(int)(mp[i][j])].insert(coordinate(i, j));
             }
         }
     }
@@ -334,6 +282,10 @@ inline int manhatten_distance(int x1, int y1, int x2, int y2)
 inline int manhatten_distance(int x1, int y1, coordinate c)
 {
     return abs(x1 - c.x) + abs(y1 - c.y);
+};
+double euclidean_distance(double x1, double y1, double x2, double y2)
+{
+	return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2));
 };
 
 
@@ -1296,41 +1248,6 @@ namespace revenge
 
 }
 
-namespace Commute
-{
-    bool RefreshInfo(IShipAPI& api)
-    {
-        if (!api.HaveMessage())
-        {
-            return false;
-        }
-        else
-        {
-            std::string mes = (api.GetMessage()).second;
-            memcpy(&ShipInfo::ShipBuffer, mes.data(), sizeof(Buffer));
-            return true;
-        }
-    }
-
-
-
-
-    void sync_ships(ITeamAPI& api)
-    {
-        auto players = api.GetShips();
-        for (size_t i = 0; i < players.size(); i++)
-        {
-            int index = players[i]->playerID;
-            std::string message;
-            message.resize(BUFFER_SIZE + 1);
-            memcpy(message.data(), &HomeInfo::TeamShipBuffer[i], BUFFER_SIZE);
-            //message[BUFFER_SIZE] = '\0';
-            api.SendBinaryMessage(index, message);
-        }
-    }
-
-}
-
 namespace HomeInfo
 {
     int first_id;
@@ -1361,6 +1278,7 @@ namespace HomeInfo
             {
                 first_id = MyShips[0].playerID;
                 coordinate tmp(MyShips[0].x / 1000, MyShips[0].y/1000);
+                /*
                 for (size_t i = 0; i < 2; i++)
                 {
                     if (manhatten_distance(tmp.x,tmp.y,MapInfo::PositionLists[MapInfo::Home][i])<=2)
@@ -1371,7 +1289,7 @@ namespace HomeInfo
                     }
 
 
-                }
+                }*/
             }
         }
 
@@ -1446,9 +1364,47 @@ namespace HomeInfo
     }
 }
 
-
 namespace ShipInfo
 {
+    struct ShipMem
+    {
+        // THUAI7::Ship NearestEnemyShip;
+        ShipMode mode;
+        THUAI7::Ship me;
+        coordinate TargetPos;  //<注意为格子数，不是坐标值
+        // THUAI7::ConstructionType ConsType;
+        // const char end = '\0';
+    };
+
+    /**
+    * @brief 自身的信息
+    * @param mode ShipMode
+    * @param myself THUAI7::Ship
+    * @param TargetPos coordinate
+    */
+    ShipMem myself;
+
+    /**
+    * @brief 敌舰
+    */
+    std::vector<std::shared_ptr<const THUAI7::Ship>> Enemies;
+    bool nearEnemy = false;
+    bool nearBullet = false;
+    std::vector<std::shared_ptr<const THUAI7::Bullet>> Bullets;
+    /**
+    * @brief 最近的敌舰
+    */
+    THUAI7::Ship NearestEnemy;
+
+    /**
+     * @brief 信息接收缓冲区
+     */
+    Commute::Buffer ShipBuffer;
+
+    /**
+     * @brief 是否是初始化状态
+     */
+    int init = 1;
     /**
      * @brief 获取自身当前状态，并储存附近的敌人
      * @param api 
@@ -1457,19 +1413,28 @@ namespace ShipInfo
     {
         myself.me = *api.GetSelfInfo();
         auto enem = api.GetEnemyShips();
-        Enemies.clear();
-        if (enem.size())
+        Enemies = std::move(enem);
+        auto bullets = api.GetBullets();
+        Bullets = std::move(bullets);
+
+        //Enemies.clear();
+        if (!Enemies.empty())
         {
-            NearestEnemy = *enem[0];
-            Enemies.push_back(*enem[0]);
-            for (size_t i = 1; i < enem.size(); i++)
-            {
-                Enemies.push_back(*enem[i]);
-                if (manhatten_distance(enem[i]->x, enem[i]->y, myself.me.x, myself.me.y) < manhatten_distance(NearestEnemy.x, NearestEnemy.y, myself.me.x, myself.me.y))
-                {
-                    NearestEnemy = *enem[i];
-                }
-            }
+            nearEnemy = true;
+            //            NearestEnemy = *enem[0];
+//            Enemies.push_back(*enem[0]);
+//            for (size_t i = 1; i < enem.size(); i++)
+//            {
+//                Enemies.push_back(*enem[i]);
+//                if (manhatten_distance(enem[i]->x, enem[i]->y, myself.me.x, myself.me.y) < manhatten_distance(NearestEnemy.x, NearestEnemy.y, myself.me.x, myself.me.y))
+//                {
+//                    NearestEnemy = *enem[i];
+//                }
+//            }
+        }
+        if (!Bullets.empty())
+        {
+            nearBullet = true; 
         }
         if (init)
         {
@@ -1485,6 +1450,41 @@ namespace ShipInfo
 
 }
 
+
+namespace Commute
+{
+    bool RefreshInfo(IShipAPI& api)
+    {
+        if (!api.HaveMessage())
+        {
+            return false;
+        }
+        else
+        {
+            std::string mes = (api.GetMessage()).second;
+            memcpy(&ShipInfo::ShipBuffer, mes.data(), sizeof(Buffer));
+            return true;
+        }
+    }
+
+
+
+
+    void sync_ships(ITeamAPI& api)
+    {
+        auto players = api.GetShips();
+        for (size_t i = 0; i < players.size(); i++)
+        {
+            int index = players[i]->playerID;
+            std::string message;
+            message.resize(BUFFER_SIZE + 1);
+            memcpy(message.data(), &HomeInfo::TeamShipBuffer[i], BUFFER_SIZE);
+            //message[BUFFER_SIZE] = '\0';
+            api.SendBinaryMessage(index, message);
+        }
+    }
+
+}
 
 
 namespace IdleMode
@@ -1580,8 +1580,9 @@ namespace RoadSearchMode
     }
     std::deque<coordinate> search_road(int x1, int y1, THUAI7::PlaceType type, IShipAPI& api)
     {
-        int min_dis = 0x7fffffff, index = MapInfo::getIndex(type);
-        auto& des = MapInfo::des_list[index];
+        int min_dis = 0x7fffffff;
+        auto index = MapInfo::PlaceTypeConvert(type, 0, 0);
+        auto& des = MapInfo::PositionLists[index];
         for (auto i = des.begin(); i != des.end();)
         {
             if (type == THUAI7::PlaceType::Resource)
@@ -1718,19 +1719,18 @@ namespace ProduceMode
         coordinate tmp;
         int x = ShipInfo::myself.me.x / 1000;  //<格子数
         int y = ShipInfo::myself.me.y / 1000;  //<格子数
-        int sz = MapInfo::PositionLists[MapInfo::Resource].size();
-        if (!sz)
+        int minDis = 0x7fffffff;
+        if (MapInfo::PositionLists[MapInfo::Resource].empty())
         {
-            return false;
-        }
-        tmp = MapInfo::PositionLists[MapInfo::Resource][0];
-        for (size_t i = 1; i < sz; i++)
+			return false;
+		}
+        for (auto const& c : MapInfo::PositionLists[MapInfo::Resource])
         {
-            if (manhatten_distance(x,y,MapInfo::PositionLists[MapInfo::Resource][i])<manhatten_distance(x,y,tmp))
+            if (manhatten_distance(x, y, c) < minDis)
             {
-                tmp = MapInfo::PositionLists[MapInfo::Resource][i];
-            }
-        }
+				tmp = c, minDis = manhatten_distance(x, y, c);
+			}
+		}
         ShipInfo::myself.TargetPos = tmp;
         return true;
     }
@@ -1754,7 +1754,7 @@ namespace ProduceMode
             }
             else
             {
-                MapInfo::PositionLists[MapInfo::Resource].erase(std::find(MapInfo::PositionLists[MapInfo::Resource].begin(), MapInfo::PositionLists[MapInfo::Resource].end(), ShipInfo::myself.TargetPos));
+                MapInfo::PositionLists[MapInfo::Resource].erase(ShipInfo::myself.TargetPos);
                 if (GetNearestResource(api))
                 {
                     return {
@@ -1806,8 +1806,21 @@ void (*clear_list[3])(IShipAPI&) = {&(IdleMode::Clear), &(RoadSearchMode::Clear)
 
 
 ShipMode nextMode;
+enum additionalMode
+{
+    Normal,
+    Run,
+    DodgeBullets
+};
 
 int Ship_Init = 1;
+void clear(IShipAPI& api)
+{
+    for (auto const& clear : clear_list)
+    {
+       clear(api);
+    }
+}
 void AI::play(IShipAPI& api)
 {
     ShipInfo::CheckInfo(api);
@@ -1819,11 +1832,8 @@ void AI::play(IShipAPI& api)
         
         if (ShipInfo::myself.mode!=ShipInfo::ShipBuffer.Mode)
         {
-            for (auto const& clear : clear_list)
-            {
-                clear(api);
-            }
             nextMode = ShipInfo::myself.mode = ShipInfo::ShipBuffer.Mode;
+            clear(api);
             switch (ShipInfo::ShipBuffer.Mode)
             {
                 default:
@@ -1836,6 +1846,27 @@ void AI::play(IShipAPI& api)
     {
         nextMode = IDLE;
     }*/
+    if (ShipInfo::nearBullet)
+    {
+        for (auto const& bullet : ShipInfo::Bullets)
+        {
+            double direct = bullet->facingDirection;
+            double distance = euclidean_distance(bullet->x, bullet->y, ShipInfo::myself.me.x, ShipInfo::myself.me.y);
+            double time = distance / bullet->speed;
+            api.EndAllAction();
+            api.Move(time + 10, direct + PI / 2);
+            return;
+		}
+    }
+    if (ShipInfo::nearEnemy)
+    {
+        if (ShipInfo::myself.me.weaponType == THUAI7::WeaponType::NullWeaponType)
+        {
+			api.EndAllAction();
+
+			return;
+		}
+    }
 
     switch (nextMode)
     {
@@ -1894,22 +1925,11 @@ void AI::play(IShipAPI& api)
 }
 
 
-
-
-
-
-
-
 //const char* get_placetype(THUAI7::PlaceType t);
 bool hasSend = false;
 bool hasInstall = false;
 bool hasBuild = false;
 bool BuildSecondCivil = false;
-
-
-
-
-
 
 volatile int Ind = 2;
 
@@ -1933,17 +1953,7 @@ TeamBT::SequenceNode root = {
 };
 
 
-
-
-
-
-
-
-
 bool run = true;
-
-const char* get__placetype(THUAI7::PlaceType t);
-
 
 
 void AI::play(ITeamAPI& api)  // 默认team playerID 为0
@@ -1956,86 +1966,8 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     }
     root.perform(api);
     Commute::sync_ships(api);
-    //api.SendTextMessage(1, "hello");
-    //api.SendTextMessage(2, "hello");
-    //Ind = 1;
-    //if (run)
-    //{
-    //    if (root.perform(api)!=TeamBT::RUNNING)
-    //    {
-    //        run = false;
-    //    }
-    //}
-    
-    //auto mp = api.GetFullMap();
-
-    //for (size_t i = 0; i < mp.size(); i++)
-    //{
-    //    for (size_t j = 0; j < mp[0].size(); j++)
-    //    {
-    //        std::cout << get__placetype(mp[i][j]) << " ";
-    //    }
-    //    std::cout << "\n";
-    //}
-
-    //std::cout << api.GetSelfInfo()->teamID << "  "<<api.GetEnergy() << std::endl;
 }
 
-
-        const char* get__placetype(THUAI7::PlaceType t)
-{
-    switch (t)
-    {
-        case THUAI7::PlaceType::NullPlaceType:
-            return "nullplacetype";
-        case THUAI7::PlaceType::Home:
-            return "home";
-        case THUAI7::PlaceType::Space:
-            return "space";
-        case THUAI7::PlaceType::Ruin:
-            return "ruin";
-            break;
-        case THUAI7::PlaceType::Shadow:
-            return "shadow";
-            break;
-        case THUAI7::PlaceType::Asteroid:
-            return "asteroid";
-        case THUAI7::PlaceType::Resource:
-            return "resource";
-        case THUAI7::PlaceType::Construction:
-            return "construction";
-            break;
-        case THUAI7::PlaceType::Wormhole:
-            return "wormhole";
-        default:
-            break;
-    }
-    return "?";
-}
-
-        /*
-        if (!moved)
-        {
-             std::this_thread::sleep_for(std::chrono::seconds(6));
-        double time = (y - 41.5 * 1000) / 3.0;
-        api.MoveLeft(time);
-        std::cout << time << std::endl;
-        std::this_thread::sleep_for(std::chrono::milliseconds(int(time)));
-        info = api.GetSelfInfo();
-        std::cout << "x: " << info->x << " y: " << info->y << std::endl;
-        time = (14 * 1000 - x) / 3.0;
-        api.MoveDown(time);
-        std::this_thread::sleep_for(std::chrono::milliseconds(int(time)+5));
-        info = api.GetSelfInfo();
-        std::cout << "x: " << info->x << " y: " << info->y << std::endl;
-        time = 1000.0;
-        api.MoveRight(time);
-        std::this_thread::sleep_for(std::chrono::milliseconds(int(time)));
-        info = api.GetSelfInfo();
-        std::cout << "x: " << info->x << " y: " << info->y << std::endl;
-        api.Produce();
-        moved = true;
-        }*/
 /*
 std::deque<coordinate> search_road(int x1, int y1, int x2, int y2)
 {
