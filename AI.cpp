@@ -183,7 +183,7 @@ namespace MapInfo
     */
     std::unordered_set<coordinate, PointHash> PositionLists[11];
 
-    std::unordered_set<coordinate, PointHash> NoStep;
+ //   std::unordered_set<coordinate, PointHash> NoStep;
 
 
     /**
@@ -1538,6 +1538,13 @@ namespace RoadSearchMode
     };
 
 
+            auto is_empty = [](int x,int y)
+            {
+                //MapInfo::Place t = MapInfo::fullmap[x][y];
+                //return (t == MapInfo::Space or t == MapInfo::Shadow or t == MapInfo::OpenWormhole);
+                THUAI7::PlaceType t = MapInfo::map[x][y];
+                return (t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole);
+            };
     std::deque<coordinate> search_road(int x1, int y1, int x2, int y2)
     {
         std::priority_queue<node> pq;
@@ -1564,11 +1571,6 @@ namespace RoadSearchMode
                 path.pop_front();
                 return path;
             }
-            auto is_empty = [](int x,int y)
-            {
-                MapInfo::Place t = MapInfo::fullmap[x][y];
-                return (t == MapInfo::Space or t == MapInfo::Shadow or t == MapInfo::OpenWormhole)&&!(coordinate(x,y)==*MapInfo::NoStep.find(coordinate(x,y)));
-            };
             for (int i = -1; i <= 1; i++)
             {
                 for (int j = -1; j <= 1; j++)
@@ -1602,7 +1604,8 @@ namespace RoadSearchMode
                         pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, 0});
                     }
                     MapInfo::Place t = MapInfo::fullmap[nx][ny];
-                    if ((t != MapInfo::Space and t != MapInfo::Shadow and t != MapInfo::OpenWormhole) || (coordinate(nx, ny) == *MapInfo::NoStep.find(coordinate(nx, ny))))
+                    //if ((t != MapInfo::Space and t != MapInfo::Shadow and t != MapInfo::OpenWormhole) || (coordinate(nx, ny) == *MapInfo::NoStep.find(coordinate(nx, ny))))
+                    if (!is_empty(nx, ny))
                         continue;
                     double cost = sqrt(i * i + j * j);
                     int h = manhatten_distance(nx, ny, x2, y2);
@@ -1666,23 +1669,19 @@ namespace RoadSearchMode
                 path.pop_front();
                 return path;
             }
-            auto is_empty = [](THUAI7::PlaceType t)
-            {
-                return t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole;
-            };
             for (int i = -1; i <= 1; i++)
             {
                 for (int j = -1; j <= 1; j++)
                 {
                     if (i == 0 and j == 0)
                         continue;
-                    if (i == -1 and j == -1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
+                    if (i == -1 and j == -1 and (!is_empty(now.x - 1,now.y) or !is_empty(now.x,now.y - 1)))
                         continue;
-                    if (i == 1 and j == -1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
+                    if (i == 1 and j == -1 and (!is_empty(now.x + 1,now.y) or !is_empty(now.x,now.y - 1)))
                         continue;
-                    if (i == -1 and j == 1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
+                    if (i == -1 and j == 1 and (!is_empty(now.x - 1,now.y) or !is_empty(now.x,now.y + 1)))
                         continue;
-                    if (i == 1 and j == 1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
+                    if (i == 1 and j == 1 and (!is_empty(now.x + 1,now.y) or !is_empty(now.x,now.y + 1)))
                         continue;
                     int nx = now.x + i, ny = now.y + j;
                     if (nx < 0 or nx >= 50 or ny < 0 or ny >= 50 or visited[nx][ny])
@@ -1693,7 +1692,8 @@ namespace RoadSearchMode
                         pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, 0});
                     }
                     THUAI7::PlaceType t = MapInfo::map[nx][ny];
-                    if (t != THUAI7::PlaceType::Space and t != THUAI7::PlaceType::Shadow and t != THUAI7::PlaceType::Wormhole)
+                    //if (t != THUAI7::PlaceType::Space and t != THUAI7::PlaceType::Shadow and t != THUAI7::PlaceType::Wormhole)
+                    if (!is_empty(nx, ny))
                         continue;
                     double cost = sqrt(i * i + j * j);
                     min_dis = 0x7fffffff;
@@ -1732,19 +1732,19 @@ namespace RoadSearchMode
         //}
         if (api.GetSelfInfo()->shipState == THUAI7::ShipState::Idle and !path.empty())
         {
-            auto next = path.front();
-            path.pop_front();
-            int dx = next.x * 1000 + 500 - ShipInfo::myself.me.x;
-            int dy = next.y * 1000 + 500 - ShipInfo::myself.me.y;
-            std::cout << "x: " << ShipInfo::myself.me.x << " y: " << ShipInfo::myself.me.y << "nx: " << next.x << "ny: " << next.y << std::endl;
-            std::cout << "dx: " << dx << " dy: " << dy << std::endl;
-            double time = sqrt(dx * dx + dy * dy) / 3.0;
-            double angle = atan2(dy, dx);
-            std::cout << "time: " << time << " angle: " << angle << std::endl;
-
-
-            bool direct_move = true;
-            std::unordered_set<coordinate, PointHash> tmplist;
+            //bool direct_move = true;
+            std::vector<std::pair<coordinate, MapInfo::Place>> temp;
+            for (auto const& ship : ShipInfo::FriendShips)
+            {
+                int x = ship->x / 1000, y = ship->y / 1000;
+                int mx = ShipInfo::myself.me.x / 1000, my = ShipInfo::myself.me.y / 1000;
+                if (euclidean_distance(x, y, mx, my) < 1.5)
+                {
+                    temp.push_back({{x, y}, MapInfo::fullmap[x][y]});
+                    MapInfo::fullmap[x][y] = MapInfo::Place::Ruin;
+                }
+            }
+            /*
             for (size_t i = 0; i < ShipInfo::FriendShips.size(); i++)
             {
                 if (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::FriendShips[i]->x / 1000, ShipInfo::FriendShips[i]->y / 1000)<1.5)
@@ -1759,17 +1759,21 @@ namespace RoadSearchMode
             {
                 api.Move(time, angle);
             }
-            else
+            else*/
+            path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y);
+            for (const auto & i : temp)
             {
-                path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y);
-                for (const auto & i : tmplist)
-                {
-                    MapInfo::NoStep.erase(MapInfo::NoStep.find(i));
-                }
+                MapInfo::fullmap[i.first.x][i.first.y] = i.second;
             }
-
-
-            // std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            auto next = path.front();
+            path.pop_front();
+            int dx = next.x * 1000 + 500 - ShipInfo::myself.me.x;
+            int dy = next.y * 1000 + 500 - ShipInfo::myself.me.y;
+            std::cout << "x: " << ShipInfo::myself.me.x << " y: " << ShipInfo::myself.me.y << "nx: " << next.x << "ny: " << next.y << std::endl;
+            std::cout << "dx: " << dx << " dy: " << dy << std::endl;
+            double time = sqrt(dx * dx + dy * dy) / 3.0;
+            double angle = atan2(dy, dx);
+            std::cout << "time: " << time << " angle: " << angle << std::endl;
         }
         return {
             ROADSEARCH,
@@ -2097,13 +2101,13 @@ TeamBT::SequenceNode root = {
     new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)})),
     new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)}))
          */
-    //new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(1,PRODUCE)}),
-    //new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3)}),
-    //new TeamBT::eventNode({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipNumThreshold(2)}),
-    //new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(SHIP_1|SHIP_2, PRODUCE)}),
-    new TeamBT::eventNode({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(3)})/*,
+    new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(1,PRODUCE)}),
+    new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3)}),
+    new TeamBT::eventNode({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipNumThreshold(2)}),
+    new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(SHIP_1|SHIP_2, PRODUCE)}),
+    new TeamBT::eventNode({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(3)}),
     new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)}),
-    new TeamBT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)})*/
+    new TeamBT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)})
 };
 
 
