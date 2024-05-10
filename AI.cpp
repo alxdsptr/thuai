@@ -1540,10 +1540,10 @@ namespace RoadSearchMode
 
             auto is_empty = [](int x,int y)
             {
-                //MapInfo::Place t = MapInfo::fullmap[x][y];
-                //return (t == MapInfo::Space or t == MapInfo::Shadow or t == MapInfo::OpenWormhole);
-                THUAI7::PlaceType t = MapInfo::map[x][y];
-                return (t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole);
+                MapInfo::Place t = MapInfo::fullmap[x][y];
+                return (t == MapInfo::Space or t == MapInfo::Shadow or t == MapInfo::OpenWormhole);
+                //THUAI7::PlaceType t = MapInfo::map[x][y];
+                //return (t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole);
             };
     std::deque<coordinate> search_road(int x1, int y1, int x2, int y2)
     {
@@ -1603,7 +1603,6 @@ namespace RoadSearchMode
                         double cost = sqrt(i * i + j * j);
                         pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, 0});
                     }
-                    MapInfo::Place t = MapInfo::fullmap[nx][ny];
                     //if ((t != MapInfo::Space and t != MapInfo::Shadow and t != MapInfo::OpenWormhole) || (coordinate(nx, ny) == *MapInfo::NoStep.find(coordinate(nx, ny))))
                     if (!is_empty(nx, ny))
                         continue;
@@ -1736,6 +1735,8 @@ namespace RoadSearchMode
             std::vector<std::pair<coordinate, MapInfo::Place>> temp;
             for (auto const& ship : ShipInfo::FriendShips)
             {
+                if (ship->playerID == ShipInfo::myself.me.playerID)
+					continue;
                 int x = ship->x / 1000, y = ship->y / 1000;
                 int mx = ShipInfo::myself.me.x / 1000, my = ShipInfo::myself.me.y / 1000;
                 if (euclidean_distance(x, y, mx, my) < 1.5)
@@ -1760,7 +1761,8 @@ namespace RoadSearchMode
                 api.Move(time, angle);
             }
             else*/
-            path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y);
+            if(!temp.empty())
+                path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y);
             for (const auto & i : temp)
             {
                 MapInfo::fullmap[i.first.x][i.first.y] = i.second;
@@ -1774,6 +1776,7 @@ namespace RoadSearchMode
             double time = sqrt(dx * dx + dy * dy) / 3.0;
             double angle = atan2(dy, dx);
             std::cout << "time: " << time << " angle: " << angle << std::endl;
+            api.Move(time, angle);
         }
         return {
             ROADSEARCH,
@@ -1978,7 +1981,10 @@ void clear(IShipAPI& api)
 void AI::play(IShipAPI& api)
 {
     ShipInfo::CheckInfo(api);
-
+    if (ShipInfo::myself.me.shipType == THUAI7::ShipType::MilitaryShip)
+    {
+        AttackMode::Perform(api);
+    }
     if (Commute::RefreshInfo(api))
     {
         std::cout << "Success\n"
@@ -2123,7 +2129,7 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
         root.events[0] = new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(1 << (HomeInfo::first_id - 1),PRODUCE)});
     }
     root.perform(api);
-    //Commute::sync_ships(api);
+    Commute::sync_ships(api);
 }
 
 /*
