@@ -1540,10 +1540,10 @@ namespace RoadSearchMode
 
             auto is_empty = [](int x,int y)
             {
-                //MapInfo::Place t = MapInfo::fullmap[x][y];
-                //return (t == MapInfo::Space or t == MapInfo::Shadow or t == MapInfo::OpenWormhole);
-                THUAI7::PlaceType t = MapInfo::map[x][y];
-                return (t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole);
+                MapInfo::Place t = MapInfo::fullmap[x][y];
+                return (t == MapInfo::Space or t == MapInfo::Shadow or t == MapInfo::OpenWormhole);
+                //THUAI7::PlaceType t = MapInfo::map[x][y];
+                //return (t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole);
             };
     std::deque<coordinate> search_road(int x1, int y1, int x2, int y2)
     {
@@ -1603,7 +1603,6 @@ namespace RoadSearchMode
                         double cost = sqrt(i * i + j * j);
                         pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, 0});
                     }
-                    MapInfo::Place t = MapInfo::fullmap[nx][ny];
                     //if ((t != MapInfo::Space and t != MapInfo::Shadow and t != MapInfo::OpenWormhole) || (coordinate(nx, ny) == *MapInfo::NoStep.find(coordinate(nx, ny))))
                     if (!is_empty(nx, ny))
                         continue;
@@ -1736,9 +1735,11 @@ namespace RoadSearchMode
             std::vector<std::pair<coordinate, MapInfo::Place>> temp;
             for (auto const& ship : ShipInfo::FriendShips)
             {
+                if (ship->playerID == ShipInfo::myself.me.playerID)
+					continue;
                 int x = ship->x / 1000, y = ship->y / 1000;
                 int mx = ShipInfo::myself.me.x / 1000, my = ShipInfo::myself.me.y / 1000;
-                if (euclidean_distance(x, y, mx, my) < 1.5 && euclidean_distance(x, y, mx, my)>0)
+                if (euclidean_distance(x, y, mx, my) < 1.5)
                 {
                     temp.push_back({{x, y}, MapInfo::fullmap[x][y]});
                     MapInfo::fullmap[x][y] = MapInfo::Place::Ruin;
@@ -1760,7 +1761,8 @@ namespace RoadSearchMode
                 api.Move(time, angle);
             }
             else*/
-            path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y);
+            if(!temp.empty())
+                path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y);
             for (const auto & i : temp)
             {
                 MapInfo::fullmap[i.first.x][i.first.y] = i.second;
@@ -1923,7 +1925,6 @@ namespace AttackMode
     {
         if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, ShipInfo::myself.TargetPos.x*1000+500, ShipInfo::myself.TargetPos.y*1000+500) <= WeaponToDis(ShipInfo::myself.me.weaponType) + 200)
         {
-            std::cout << "123145645645646584\n";
             if (ShipInfo::myself.me.shipState != THUAI7::ShipState::Idle)
             {
                 api.EndAllAction();
@@ -2007,7 +2008,7 @@ void AI::play(IShipAPI& api)
         }
     }
 
-    std::cout << api.HaveView(ShipInfo::myself.me.x, ShipInfo::myself.me.y)<<std::endl;
+
     //ProduceMode::GetNearestResource(api);
     
     /*
