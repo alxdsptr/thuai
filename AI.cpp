@@ -2,6 +2,7 @@
 #include <thread>
 #include <array>
 #include <queue>
+#include <stack>
 #include <list>
 #include <unordered_set>
 #include <cstring>
@@ -267,10 +268,118 @@ namespace MapInfo
         }
     }
 
-
-
 }  // namespace MapInfo
 
+namespace ShipInfo
+{
+    struct ShipMem
+    {
+        // THUAI7::Ship NearestEnemyShip;
+        ShipMode mode;
+        THUAI7::Ship me;
+        coordinate TargetPos;  //<注意为格子数，不是坐标值
+        // THUAI7::ConstructionType ConsType;
+        // const char end = '\0';
+    };
+
+    /**
+    * @brief 自身的信息
+    * @param mode ShipMode
+    * @param myself THUAI7::Ship
+    * @param TargetPos coordinate
+    */
+    ShipMem myself;
+
+    /**
+    * @brief 敌舰
+    */
+    std::vector<std::shared_ptr<const THUAI7::Ship>> Enemies;
+
+    /**
+     * @brief 我方舰船
+     */
+    std::vector<std::shared_ptr<const THUAI7::Ship>> FriendShips;
+
+    bool nearEnemy = false;
+    bool nearBullet = false;
+    std::vector<std::shared_ptr<const THUAI7::Bullet>> Bullets;
+    /**
+    * @brief 最近的敌舰
+    */
+    THUAI7::Ship NearestEnemy;
+
+    /**
+     * @brief 信息接收缓冲区
+     */
+    Commute::Buffer ShipBuffer;
+
+    THUAI7::ConstructionType constructType = THUAI7::ConstructionType::Factory;
+
+
+    /**
+     * @brief 是否是初始化状态
+     */
+    int init = 1;
+    /**
+     * @brief 获取自身当前状态，并储存附近的敌人
+     * @param api 
+     */
+    void CheckInfo(IShipAPI& api)
+    {
+        myself.me = *api.GetSelfInfo();
+        auto enem = api.GetEnemyShips();
+        
+        auto bullets = api.GetBullets();
+
+        Enemies = std::move(enem);
+        Bullets = std::move(bullets);
+
+        auto fri = api.GetShips();
+        FriendShips.clear();
+        for (auto const& ship : fri)
+        {
+            if (ship->playerID == myself.me.playerID)
+                continue;
+            FriendShips.push_back(ship);
+        }
+
+
+        //Enemies.clear();
+        if (!Enemies.empty())
+        {
+            nearEnemy = true;
+            //            NearestEnemy = *enem[0];
+//            Enemies.push_back(*enem[0]);
+//            for (size_t i = 1; i < enem.size(); i++)
+//            {
+//                Enemies.push_back(*enem[i]);
+//                if (manhatten_distance(enem[i]->x, enem[i]->y, myself.me.x, myself.me.y) < manhatten_distance(NearestEnemy.x, NearestEnemy.y, myself.me.x, myself.me.y))
+//                {
+//                    NearestEnemy = *enem[i];
+//                }
+//            }
+        }
+        if (!Bullets.empty())
+        {
+            nearBullet = true; 
+        }
+        if (init)
+        {
+            MapInfo::LoadFullMap(api);
+            myself.mode = (myself.me.playerID==3?ATTACK:PRODUCE);
+            myself.TargetPos = *(MapInfo::PositionLists[MapInfo::EnemyHome].begin());
+            init = 0;
+        }
+    }
+
+
+
+    bool InMyHalfPlace()
+    {
+        return true;
+    }
+
+}
 /**
  * @brief 判断自己是否在某类型格子附近
  * @param x x坐标，注意不是格子数
@@ -405,7 +514,7 @@ namespace BT
      * @param state 与最后一个执行的子节点的状态相同
      */
     template<typename T>
-    class SequenceNode : public baseNode
+    class SequenceNode : public baseNode<T>
     {
     private:
         inline void ResetChildren()
@@ -418,8 +527,9 @@ namespace BT
         }
 
     public:
-        std::vector<eventNode*> events;
+        std::vector<eventNode<T>*> events;
         int curChild = 0;
+        //NodeState state;
 
         /**
          * @brief 队列节点的perform函数\n
@@ -427,7 +537,7 @@ namespace BT
          * @param api
          * @return 仅当当前执行的子节点返回FAIL时返回FAIL、最后一个子节点返回SUCCESS时返回SUCCESS；否则返回RUNNING
          */
-        virtual NodeState perform(T& api)
+        NodeState perform(T& api) override
         {
 //            switch (state)
 //            {
@@ -440,7 +550,7 @@ namespace BT
 //                    return state;
 //                    break;
 //            }
-            state = RUNNING;
+            baseNode<T>::state = RUNNING;
             switch (events[curChild]->perform(api))
             {
                 case RUNNING:
@@ -448,7 +558,7 @@ namespace BT
                 case SUCCESS:
                     if (curChild == events.size() - 1)
                     {
-                        state = SUCCESS;
+                        baseNode<T>::state = SUCCESS;
                         ResetChildren();
                     }
                     else
@@ -457,16 +567,16 @@ namespace BT
                     }
                     break;
                 case FAIL:
-                    state = FAIL;
+                    baseNode<T>::state = FAIL;
 //                    ResetChildren();
                     break;
                 default:
                     break;
             }
             std::cout << curChild << std::endl;
-            return state;
+            return baseNode<T>::state;
         }
-        SequenceNode(std::initializer_list<eventNode*> l) :
+        SequenceNode(std::initializer_list<eventNode<T>*> l) :
             events(l),
             curChild(0)
         {
@@ -531,6 +641,10 @@ namespace Conditions
     bool always(ITeamAPI&)
     {
         return true;
+    }
+    bool always_ship(IShipAPI&)
+    {
+        return true; 
     }
     auto EnergyThreshold(int threshold)
     {
@@ -599,10 +713,34 @@ namespace ShipAction
             return BT::NodeState::SUCCESS;
         }
     };
+    /*
     BT::SequenceNode<IShipAPI> DodgeAndAttack = {
-        BT::SequenceNode<IShipAPI>{Conditions::always, MoveFunc(0, 0)},
-        BT::SequenceNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), AttackFunc(0, 0)}
-    };
+        new BT::eventNode<IShipAPI>(Conditions::always, MoveFunc{0, 0}),
+        new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), AttackFunc(0, 0)}
+    };*/
+    /*
+    class DodgeNode
+    {
+        bool moveState = false;
+        //bool attackState = false;
+        std::function<bool(IShipAPI&)> cond = Conditions::JudgeSelfState(THUAI7::ShipState::Idle);
+
+    public:
+        MoveFunc move{0, 0};
+        AttackFunc attack{0, 0};
+        bool perform(IShipAPI& api)
+        {
+            if (!moveState)
+            {
+                move(api);
+                moveState = true;
+            }else if (moveState and cond(api)){
+                attack(api);
+                return true;
+            }
+            return false;
+        }
+    }dodge;*/
 }
 
 namespace HomeAction
@@ -817,116 +955,6 @@ namespace HomeInfo
     }
 }
 
-namespace ShipInfo
-{
-    struct ShipMem
-    {
-        // THUAI7::Ship NearestEnemyShip;
-        ShipMode mode;
-        THUAI7::Ship me;
-        coordinate TargetPos;  //<注意为格子数，不是坐标值
-        // THUAI7::ConstructionType ConsType;
-        // const char end = '\0';
-    };
-
-    /**
-    * @brief 自身的信息
-    * @param mode ShipMode
-    * @param myself THUAI7::Ship
-    * @param TargetPos coordinate
-    */
-    ShipMem myself;
-
-    /**
-    * @brief 敌舰
-    */
-    std::vector<std::shared_ptr<const THUAI7::Ship>> Enemies;
-
-    /**
-     * @brief 我方舰船
-     */
-    std::vector<std::shared_ptr<const THUAI7::Ship>> FriendShips;
-
-    bool nearEnemy = false;
-    bool nearBullet = false;
-    std::vector<std::shared_ptr<const THUAI7::Bullet>> Bullets;
-    /**
-    * @brief 最近的敌舰
-    */
-    THUAI7::Ship NearestEnemy;
-
-    /**
-     * @brief 信息接收缓冲区
-     */
-    Commute::Buffer ShipBuffer;
-
-    THUAI7::ConstructionType constructType = THUAI7::ConstructionType::Factory;
-
-
-    /**
-     * @brief 是否是初始化状态
-     */
-    int init = 1;
-    /**
-     * @brief 获取自身当前状态，并储存附近的敌人
-     * @param api 
-     */
-    void CheckInfo(IShipAPI& api)
-    {
-        myself.me = *api.GetSelfInfo();
-        auto enem = api.GetEnemyShips();
-        
-        auto bullets = api.GetBullets();
-
-        Enemies = std::move(enem);
-        Bullets = std::move(bullets);
-
-        auto fri = api.GetShips();
-        FriendShips.clear();
-        for (auto const& ship : fri)
-        {
-            if (ship->playerID == myself.me.playerID)
-                continue;
-            FriendShips.push_back(ship);
-        }
-
-
-        //Enemies.clear();
-        if (!Enemies.empty())
-        {
-            nearEnemy = true;
-            //            NearestEnemy = *enem[0];
-//            Enemies.push_back(*enem[0]);
-//            for (size_t i = 1; i < enem.size(); i++)
-//            {
-//                Enemies.push_back(*enem[i]);
-//                if (manhatten_distance(enem[i]->x, enem[i]->y, myself.me.x, myself.me.y) < manhatten_distance(NearestEnemy.x, NearestEnemy.y, myself.me.x, myself.me.y))
-//                {
-//                    NearestEnemy = *enem[i];
-//                }
-//            }
-        }
-        if (!Bullets.empty())
-        {
-            nearBullet = true; 
-        }
-        if (init)
-        {
-            MapInfo::LoadFullMap(api);
-            myself.mode = (myself.me.playerID==3?ATTACK:PRODUCE);
-            myself.TargetPos = *(MapInfo::PositionLists[MapInfo::EnemyHome].begin());
-            init = 0;
-        }
-    }
-
-
-
-    bool InMyHalfPlace()
-    {
-        return true;
-    }
-
-}
 
 
 namespace Commute
@@ -1577,8 +1605,19 @@ enum additionalMode
 };
 
 
+std::stack<std::function<void(IShipAPI&)>> callStack;
+//{&ShipStep};
 
-
+auto WrapperFunc(std::function<BT::NodeState(IShipAPI& api)> func)
+{
+    return [=](IShipAPI& api)
+    {
+        if (func(api) == BT::NodeState::SUCCESS)
+        {
+            callStack.pop();
+        }
+    };
+}
 int Ship_Init = 1;
 void clear(IShipAPI& api)
 {
@@ -1593,6 +1632,7 @@ void AI::play(IShipAPI& api)
     if (Ship_Init)
     {
         nextMode = (api.GetSelfInfo()->playerID == 3 ? ATTACK : PRODUCE);
+        callStack.push(&ShipStep);
         Ship_Init = 0;
     }
     if (Commute::RefreshInfo(api))
@@ -1635,16 +1675,25 @@ void AI::play(IShipAPI& api)
             api.EndAllAction();
             double angle = i->facingDirection;
             double move_angle = angle + PI / 2;
+            //BT::SequenceNode<IShipAPI> dodgeNode{
+            auto dodgeNode = new BT::SequenceNode<IShipAPI>{
+                new BT::eventNode<IShipAPI>{Conditions::always_ship, ShipAction::MoveFunc(move_angle, 200)},
+                new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), ShipAction::AttackFunc(i->x, i->y)},
+            };
             /*
             int ex = i->x, ey = i->y;
             int mx = ShipInfo::myself.me.x, my = ShipInfo::myself.me.y;
             double dis = euclidean_distance(ex, ey, mx, my);
             */
-            ShipAction::DodgeAndAttack.events[0].set(angle + PI / 2, 300);
-            ShipAction::DodgeAndAttack.events[1].set(i->x, i->y);
+            //ShipAction::DodgeAndAttack.events[0].set(angle + PI / 2, 300);
+            //ShipAction::DodgeAndAttack.events[1].set(i->x, i->y);
+            callStack.push(WrapperFunc([dodgeNode](IShipAPI& api)
+                                     { return dodgeNode->perform(api); }));
             break;
         } 
     }
+    callStack.top()(api);
+    //ShipStep(api);
     /*
     if (ShipInfo::nearEnemy)
     {
@@ -1659,7 +1708,6 @@ void AI::play(IShipAPI& api)
   //  std::cout << ((nextMode == ROADSEARCH) ? "Next ROAD\n" : "");
   //  std::cout << ((nextMode == IDLE) ? "Next IDLE\n" : "");
 
-    ShipStep(api);
 
     
      //if (myself.mode!=cur_Mode)
@@ -1747,7 +1795,7 @@ BT::SequenceNode<ITeamAPI> root = {
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipNumThreshold(2)}),
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, CONSTRUCT)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(3)}),
-    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, ATTACK)}) /*
+    new BT::eventNode<ITeamAPI>(Conditions::always, HomeAction::SetShipMode(SHIP_3, ATTACK)) /*
     new BT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)}),
     new BT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)})*/
 };
