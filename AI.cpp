@@ -1852,7 +1852,12 @@ namespace ConstructMode
     ModeRetval Perform(IShipAPI& api)
     {
         //if (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1.5)
-        if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1)
+        auto near_enough = [](IShipAPI& api)
+        {
+            //return (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1);
+            return (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1.5);
+        };
+        if (near_enough(api))
         {
             auto res = api.GetConstructionState(ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y);
             if (res.second <= 0)
@@ -1874,19 +1879,12 @@ namespace ConstructMode
 
                     if (GetNearestConstruction(api))
                     {
-                        RoadSearchMode::end_condition = [](IShipAPI& api)
+                            /* [](IShipAPI& api)
                         {
-                            //if (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1.5)
-                            if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1)
-                            {
-                                return true;
-                            }
-                            else
-                            {
-                                return false;
-                            }
-                        };
+                        return (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1);
+                        };*/
 
+                        RoadSearchMode::end_condition = near_enough;
                         return {
                             ROADSEARCH,
                             true
@@ -1952,7 +1950,12 @@ namespace ProduceMode
     ModeRetval Perform(IShipAPI& api)
     {
         //if (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1.5)
-        if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1)
+        auto near_enough = [](IShipAPI& api)
+        {
+            //return (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1);
+            return (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1.5);
+        };
+        if (near_enough(api))
         {
             if (api.GetResourceState(ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y))
             {
@@ -1973,19 +1976,7 @@ namespace ProduceMode
 
                     if (GetNearestResource(api))
                     {
-                        RoadSearchMode::end_condition = [](IShipAPI& api)
-                        {
-                            //if (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1.5)
-                            if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1)
-                            {
-                                return true;
-                            }
-                            else
-                            {
-                                return false;
-                            }
-                        };
-
+                        RoadSearchMode::end_condition = near_enough;
                         return {
                             ROADSEARCH,
                             true
@@ -2067,7 +2058,10 @@ namespace AttackMode
                 api.EndAllAction();
             }
 
-            double angle = atan2(ShipInfo::myself.TargetPos.y * 1000 + 500 - ShipInfo::myself.me.y, ShipInfo::myself.TargetPos.x * 1000 + 500 - ShipInfo::myself.me.x);
+            //double angle = atan2(ShipInfo::myself.TargetPos.y * 1000 + 500 - ShipInfo::myself.me.y, ShipInfo::myself.TargetPos.x * 1000 + 500 - ShipInfo::myself.me.x);
+            double angle = -0.3;
+            std::cout << "mydirect: " << ShipInfo::myself.me.facingDirection << std::endl;
+            std::cout << "angle: " << angle << std::endl;
             api.Attack(angle);
             return {
                 ATTACK,
@@ -2212,6 +2206,7 @@ void ShipStep(IShipAPI& api)
     }
     else if (nextMode == ATTACK)
     {
+        std::cout << "mydirect: " << ShipInfo::myself.me.facingDirection << std::endl;
         res = AttackMode::Perform(api);
         nextMode = res.mode;
     }
@@ -2273,7 +2268,8 @@ TeamBT::SequenceNode root = {
     new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
     new TeamBT::eventNode({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipNumThreshold(2)}),
     new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(SHIP_2, CONSTRUCT)}),
-    new TeamBT::eventNode({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(3)})/*,
+    new TeamBT::eventNode({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(3)}),
+    new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(SHIP_3, ATTACK)}) /*
     new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)}),
     new TeamBT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)})*/
 };
