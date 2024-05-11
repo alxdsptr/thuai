@@ -123,15 +123,25 @@ namespace Commute
 {
     struct Buffer
     {
-        int playerID;
         ShipMode Mode;
-        bool SpecifyTarget = false;
+        unsigned char ModeParam;
+        bool with_target;
         coordinate target;
         bool with_param = false;
-        size_t param;
+        unsigned char instruction;
+        unsigned char param;
+        coordinate param_pos;
+    };
+
+    struct ReportBuffer
+    {
+        unsigned char instruction;
+        unsigned char param;
+        coordinate param_pos;
     };
 
     constexpr size_t BUFFER_SIZE = sizeof(Commute::Buffer);
+    constexpr size_t REPORTBUFFER_SIZE = sizeof(Commute::ReportBuffer);
     using bytePointer = unsigned char*;
 }
 namespace HomeInfo
@@ -851,7 +861,6 @@ namespace HomeInfo
             MySide = (api.GetSelfInfo()->teamID == 0) ? RED : BLUE;
             for (size_t i = 0; i < 4; i++)
             {
-                TeamShipBuffer[i].playerID = i + 1;
                 TeamShipBuffer[i].Mode = IDLE;
             }
         }
@@ -860,6 +869,7 @@ namespace HomeInfo
         {
             auto sps = api.GetShips();
             MyShips.clear();
+            memset(UsableShip, 0, 4 * sizeof(int));
             for (size_t i = 0; i < sps.size(); i++)
             {
                 MyShips.push_back(*sps[i]);
@@ -978,10 +988,9 @@ namespace Commute
 
     void sync_ships(ITeamAPI& api)
     {
-        auto players = api.GetShips();
-        for (size_t i = 0; i < players.size(); i++)
+        for (size_t i = 0; i < HomeInfo::MyShips.size(); i++)
         {
-            int index = players[i]->playerID;
+            int index = HomeInfo::MyShips[i].playerID;
             std::string message;
             message.resize(BUFFER_SIZE + 1);
             memcpy(message.data(), &HomeInfo::TeamShipBuffer[i], BUFFER_SIZE);
