@@ -302,7 +302,7 @@ double euclidean_distance(double x1, double y1, double x2, double y2)
 };
 
 
-namespace TeamBT
+namespace BT
 {
 
     /**
@@ -324,27 +324,28 @@ namespace TeamBT
      * @param action 待执行的操作对应的函数
      *
      */
+    template <typename T>
     class eventNode
     {
     public:
         NodeState state;
-        std::function<bool(ITeamAPI& api)> condition;    ///< 执行条件
-        std::optional<std::function<bool(ITeamAPI& api)>> judgeSuccess;  ///< 补充用来判断是否成功的函数
-        std::function<NodeState(ITeamAPI& api)> action;  ///< 待执行的函数
-        eventNode(std::function<bool(ITeamAPI& api)> c, std::function<NodeState(ITeamAPI& api)> a) :
+        std::function<bool(T& api)> condition;    ///< 执行条件
+        std::optional<std::function<bool(T& api)>> judgeSuccess;  ///< 补充用来判断是否成功的函数
+        std::function<NodeState(T& api)> action;  ///< 待执行的函数
+        eventNode(std::function<bool(T& api)> c, std::function<NodeState(T& api)> a) :
             condition(c),
             action(a),
             state(IDLE),
             judgeSuccess(std::nullopt)
         {}
-        eventNode(std::function<bool(ITeamAPI& api)> c, std::function<NodeState(ITeamAPI& api)> a, std::function<bool(ITeamAPI& api)> jf):
+        eventNode(std::function<bool(T& api)> c, std::function<NodeState(T& api)> a, std::function<bool(T& api)> jf):
             condition(c),
             action(a),
             state(IDLE),
             judgeSuccess(jf)
         {}
 
-        NodeState perform(ITeamAPI& api)
+        NodeState perform(T& api)
         {
 //            switch (state)
 //            {
@@ -383,6 +384,7 @@ namespace TeamBT
      * @brief 提供行为树节点的基本内容
      * @see NodeState
      */
+    template<typename T>
     class baseNode
     {
     public:
@@ -392,7 +394,7 @@ namespace TeamBT
             state(x)
         {
         }
-        virtual NodeState perform(ITeamAPI& api) = 0;
+        virtual NodeState perform(T& api) = 0;
         virtual ~baseNode(){}
     };
 
@@ -402,6 +404,7 @@ namespace TeamBT
      * @brief 队列节点，依次执行子节点，直到节点返回结果为FAIL或全部子节点都被执行完
      * @param state 与最后一个执行的子节点的状态相同
      */
+    template<typename T>
     class SequenceNode : public baseNode
     {
     private:
@@ -424,7 +427,7 @@ namespace TeamBT
          * @param api
          * @return 仅当当前执行的子节点返回FAIL时返回FAIL、最后一个子节点返回SUCCESS时返回SUCCESS；否则返回RUNNING
          */
-        virtual NodeState perform(ITeamAPI& api)
+        virtual NodeState perform(T& api)
         {
 //            switch (state)
 //            {
@@ -487,600 +490,8 @@ namespace TeamBT
             }
         }
     };
-
-    /**
-     * @brief 节点功能：反复执行子节点，直到返回SUCCESS
-     *
-     */
-    class TryUntilSuccessNode : public baseNode
-    {
-    public:
-        baseNode* child;
-        TryUntilSuccessNode(baseNode* x) :
-            baseNode(RUNNING),
-            child(x)
-        {
-        }
-
-        /**
-         * @brief TryUntilSuccess对应的perform虚函数
-         * @param api
-         * @return 若子节点返回SUCCESS或当前状态已经为SUCCESS，则返回SUCCESS；反之返回RUNNING
-         */
-        virtual NodeState perform(ITeamAPI& api)
-        {
-            if (state == IDLE)
-            {
-                state = RUNNING;
-            }
-            else if (state == RUNNING)
-            {
-                switch (child->perform(api))
-                {
-                    case SUCCESS:
-                        state = SUCCESS;
-                        child->state = IDLE;
-                        break;
-                    case FAIL:
-                        child->state = IDLE;
-                        break;
-                    default:
-                        break;
-                }
-            }
-            return state;
-        }
-
-        virtual ~TryUntilSuccessNode()
-        {
-            delete child;
-            child = NULL;
-        }
-    };
-
-    /**
-     * @brief decorator节点，执行一次子节点，不论子节点返回值如何，均返回SUCCESS
-     */
-    class AlwaysSuccessNode : public baseNode
-    {
-    public:
-        baseNode* child;  ///< 要执行的子节点
-        AlwaysSuccessNode(baseNode* x) :
-            baseNode(IDLE),
-            child(x)
-        {
-        }
-
-        virtual NodeState perform(ITeamAPI& api)
-        {
-            if (state == IDLE)
-            {
-                state = RUNNING;
-            }
-            if (state == RUNNING)
-            {
-                switch (child->perform(api))
-                {
-                    case RUNNING:
-                        state = RUNNING;
-                        break;
-                    default:
-                        state = SUCCESS;
-                        break;
-                }
-            }
-            return state;
-        }
-
-        virtual ~AlwaysSuccessNode()
-        {
-            delete child;
-            child = NULL;
-        }
-    };
-
-    /**
-     * @brief 选择器节点，依次尝试每个子节点，直到有一个成功或全部失败
-     */
-    /*
-    class fallbackNode : public baseNode
-    {
-    private:
-        inline void ResetChildren()
-        {
-            for (size_t i = 0; i < events.size(); i++)
-            {
-                events[i]->state = IDLE;
-            }
-            curChild = 0;
-        }
-
-    public:
-        std::vector<baseNode*> events;
-        int curChild;
-*/
-        /**
-         * @brief 选择器节点的perform函数
-         * - 如果当前子节点返回SUCCESS，则重置全部子节点状态，本节点状态设为SUCCESS并返回SUCCESS
-         * - 如果当前子节点返回RUNNING，下一次调用时仍调用该子节点，直到它返回FAIL或SUCCESS；返回RUNNING
-         * - 如果当前子节点返回FAIL
-         *  . 如果已经是最后一个子节点，则本节点状态为FAIL，返回FAIL
-         *  . 否则下一次调用执行下一个子节点，本次返回RUNNING
-         * @param api
-         * @return
-     */
-    /*
-        virtual NodeState perform(ITeamAPI& api)
-        {
-            switch (state)
-            {
-                case IDLE:
-                    state = RUNNING;
-                    break;
-                case RUNNING:
-                    break;
-                default:
-                    return state;
-                    break;
-            }
-
-            switch (events[curChild]->perform(api))
-            {
-                case RUNNING:
-                    break;
-                case FAIL:
-                    if (curChild == events.size() - 1)
-                    {
-                        state = FAIL;
-                        ResetChildren();
-                    }
-                    else
-                    {
-                        curChild++;
-                    }
-                    break;
-                case SUCCESS:
-                    state = SUCCESS;
-                    ResetChildren();
-                    break;
-                default:
-                    break;
-            }
-            return state;
-        }
-
-        fallbackNode(std::initializer_list<baseNode*> l) :
-            events(l),
-            curChild(0)
-        {
-        }
-
-        fallbackNode(const fallbackNode& a) :
-            curChild(0)
-        {
-            for (size_t i = 0; i < a.events.size(); i++)
-            {
-                events.push_back(new auto(*a.events[i]));
-            }
-        }
-
-        virtual ~fallbackNode()
-        {
-            for (size_t i = 0; i < events.size(); i++)
-            {
-                delete events[i];
-                events[i] = NULL;
-            }
-        }
-    };*/
-
 }
 
-namespace ShipBT
-{
-
-    /**
-     * @enum NodeState
-     * @brief 节点运行状态
-     */
-    enum NodeState
-    {
-        IDLE = 0,  ///< 未初始化值
-        SUCCESS,   ///< 成功
-        FAIL,      ///< 失败
-        RUNNING    ///< 操作尚未完成，需要继续运行该节点
-    };
-
-    /**
-     * @class rootNode
-     * @brief 提供行为树节点的基本内容
-     * @see NodeState
-     */
-    class baseNode
-    {
-    public:
-        NodeState state;
-
-        baseNode(NodeState x = IDLE) :
-            state(x)
-        {
-        }
-
-        virtual NodeState perform(IShipAPI& api)
-        {
-            return IDLE;
-        }
-
-        virtual void Clear()
-        {
-            state = IDLE;
-        }
-
-        virtual ~baseNode()
-        {
-        }
-    };
-
-    /**
-     * @class eventNode
-     * @brief 事件节点，当条件为真执行事件，并储存事件执行状态；否则节点状态为FAIL
-     * @param condition 返回是否执行的布尔值的条件函数
-     * @param action 待执行的操作对应的函数
-     *
-     */
-    class eventNode : public baseNode
-    {
-    public:
-        std::function<bool(IShipAPI& api)> condition;    ///< 执行条件
-        std::function<NodeState(IShipAPI& api)> action;  ///< 待执行的函数
-        eventNode(std::function<bool(IShipAPI& api)> c, std::function<NodeState(IShipAPI& api)> a) :
-            condition(c),
-            action(a)
-        {
-        }
-
-        virtual NodeState perform(IShipAPI& api)
-        {
-            switch (state)
-            {
-                case IDLE:
-                    state = RUNNING;
-                    break;
-                case RUNNING:
-                    break;
-                default:
-                    return state;
-                    break;
-            }
-
-            if (condition(api))
-            {
-                state = action(api);
-            }
-            else
-            {
-                state = FAIL;
-            }
-
-            return state;
-        }
-
-        virtual void Clear()
-        {
-            state = IDLE;
-        }
-
-        virtual ~eventNode()
-        {
-        }
-    };
-
-    /**
-     * @class SequenceNode
-     * @brief 队列节点，依次执行子节点，直到节点返回结果为FAIL或全部子节点都被执行完
-     * @param state 与最后一个执行的子节点的状态相同
-     */
-    class SequenceNode : public baseNode
-    {
-    private:
-        inline void ResetChildren()
-        {
-            for (size_t i = 0; i < events.size(); i++)
-            {
-                events[i]->state = IDLE;
-            }
-            curChild = 0;
-        }
-
-    public:
-        std::vector<baseNode*> events;
-        int curChild;
-
-        /**
-         * @brief 队列节点的perform函数\n
-         * - 按照顺序执行子节点，如果成功，则下次调用时执行下一节点（如果全部执行完，将重置子节点状态）；如果失败，本队列节点的状态将被设为FAIL，并重置子节点状态
-         * @param api
-         * @return 仅当当前执行的子节点返回FAIL时返回FAIL、最后一个子节点返回SUCCESS时返回SUCCESS；否则返回RUNNING
-         */
-        virtual NodeState perform(IShipAPI& api)
-        {
-            switch (state)
-            {
-                case IDLE:
-                    state = RUNNING;
-                    break;
-                case RUNNING:
-                    break;
-                default:
-                    return state;
-                    break;
-            }
-
-            switch (events[curChild]->perform(api))
-            {
-                case RUNNING:
-                    break;
-                case SUCCESS:
-                    if (curChild == events.size() - 1)
-                    {
-                        state = SUCCESS;
-                        ResetChildren();
-                    }
-                    else
-                    {
-                        curChild++;
-                    }
-                    break;
-                case FAIL:
-                    state = FAIL;
-                    ResetChildren();
-                    break;
-                default:
-                    break;
-            }
-            return state;
-        }
-
-        virtual void Clear()
-        {
-            state = IDLE;
-            for (size_t i = 0; i < events.size(); i++)
-            {
-                events[i]->Clear();
-            }
-        }
-
-        SequenceNode(std::initializer_list<baseNode*> l) :
-            events(l),
-            curChild(0)
-        {
-        }
-
-        SequenceNode(const SequenceNode& a) :
-            curChild(0)
-        {
-            for (size_t i = 0; i < a.events.size(); i++)
-            {
-                events.push_back(new auto(*a.events[i]));
-            }
-        }
-
-        virtual ~SequenceNode()
-        {
-            for (size_t i = 0; i < events.size(); i++)
-            {
-                delete events[i];
-                events[i] = NULL;
-            }
-        }
-    };
-
-    /**
-     * @brief 节点功能：反复执行子节点，直到返回SUCCESS
-     *
-     */
-    class TryUntilSuccessNode : public baseNode
-    {
-    public:
-        baseNode* child;
-        TryUntilSuccessNode(baseNode* x) :
-            baseNode(RUNNING),
-            child(x)
-        {
-        }
-
-        /**
-         * @brief TryUntilSuccess对应的perform虚函数
-         * @param api
-         * @return 若子节点返回SUCCESS或当前状态已经为SUCCESS，则返回SUCCESS；反之返回RUNNING
-         */
-        virtual NodeState perform(IShipAPI& api)
-        {
-            if (state == IDLE)
-            {
-                state = RUNNING;
-            }
-            else if (state == RUNNING)
-            {
-                switch (child->perform(api))
-                {
-                    case SUCCESS:
-                        state = SUCCESS;
-                        child->state = IDLE;
-                        break;
-                    case FAIL:
-                        child->state = IDLE;
-                        break;
-                    default:
-                        break;
-                }
-            }
-            return state;
-        }
-
-        virtual void Clear()
-        {
-            state = IDLE;
-            child->Clear();
-        }
-
-        virtual ~TryUntilSuccessNode()
-        {
-            delete child;
-            child = NULL;
-        }
-    };
-
-    /**
-     * @brief decorator节点，执行一次子节点，不论子节点返回值如何，均返回SUCCESS
-     */
-    class AlwaysSuccessNode : public baseNode
-    {
-    public:
-        baseNode* child;  ///< 要执行的子节点
-        AlwaysSuccessNode(baseNode* x) :
-            baseNode(IDLE),
-            child(x)
-        {
-        }
-
-        virtual NodeState perform(IShipAPI& api)
-        {
-            if (state == IDLE)
-            {
-                state = RUNNING;
-            }
-            if (state == RUNNING)
-            {
-                switch (child->perform(api))
-                {
-                    case RUNNING:
-                        state = RUNNING;
-                        break;
-                    default:
-                        state = SUCCESS;
-                        break;
-                }
-            }
-            return state;
-        }
-
-        virtual void Clear()
-        {
-            state = IDLE;
-            child->Clear();
-        }
-
-        virtual ~AlwaysSuccessNode()
-        {
-            delete child;
-            child = NULL;
-        }
-    };
-
-    /**
-     * @brief 选择器节点，依次尝试每个子节点，直到有一个成功或全部失败
-     */
-    class fallbackNode : public baseNode
-    {
-    private:
-        inline void ResetChildren()
-        {
-            for (size_t i = 0; i < events.size(); i++)
-            {
-                events[i]->state = IDLE;
-            }
-            curChild = 0;
-        }
-
-    public:
-        std::vector<baseNode*> events;
-        int curChild;
-
-        /**
-         * @brief 选择器节点的perform函数
-         * - 如果当前子节点返回SUCCESS，则重置全部子节点状态，本节点状态设为SUCCESS并返回SUCCESS
-         * - 如果当前子节点返回RUNNING，下一次调用时仍调用该子节点，直到它返回FAIL或SUCCESS；返回RUNNING
-         * - 如果当前子节点返回FAIL
-         *  . 如果已经是最后一个子节点，则本节点状态为FAIL，返回FAIL
-         *  . 否则下一次调用执行下一个子节点，本次返回RUNNING
-         * @param api
-         * @return
-         */
-        virtual NodeState perform(IShipAPI& api)
-        {
-            switch (state)
-            {
-                case IDLE:
-                    state = RUNNING;
-                    break;
-                case RUNNING:
-                    break;
-                default:
-                    return state;
-                    break;
-            }
-
-            switch (events[curChild]->perform(api))
-            {
-                case RUNNING:
-                    break;
-                case FAIL:
-                    if (curChild == events.size() - 1)
-                    {
-                        state = FAIL;
-                        ResetChildren();
-                    }
-                    else
-                    {
-                        curChild++;
-                    }
-                    break;
-                case SUCCESS:
-                    state = SUCCESS;
-                    ResetChildren();
-                    break;
-                default:
-                    break;
-            }
-            return state;
-        }
-
-        virtual void Clear()
-        {
-            state = IDLE;
-            for (size_t i = 0; i < events.size(); i++)
-            {
-                events[i]->Clear();
-            }
-        }
-
-        fallbackNode(std::initializer_list<baseNode*> l) :
-            events(l),
-            curChild(0)
-        {
-        }
-
-        fallbackNode(const fallbackNode& a) :
-            curChild(0)
-        {
-            for (size_t i = 0; i < a.events.size(); i++)
-            {
-                events.push_back(new auto(*a.events[i]));
-            }
-        }
-
-        virtual ~fallbackNode()
-        {
-            for (size_t i = 0; i < events.size(); i++)
-            {
-                delete events[i];
-                events[i] = NULL;
-            }
-        }
-    };
-
-}  // namespace ShipBT
 
 namespace ShipFSM
 {
@@ -1136,9 +547,63 @@ namespace Conditions
         return [=](ITeamAPI& api) {
             return HomeInfo::MyShips[shipID - 1].producerType == type;
         };
-    
+    }
+    auto JudgeSelfState(THUAI7::ShipState state)
+    {
+        return [=](IShipAPI& api) {
+            return ShipInfo::myself.me.shipState == state;
+        };
     }
 }  
+namespace ShipAction
+{
+    class MoveFunc
+    {
+    private:
+        double angle;
+        int time;
+    public:
+        void set(double a, int b)
+        {
+            angle = a, time = b; 
+        }
+        MoveFunc(double a, int b) :
+            angle{a},
+            time{b}
+        {}
+        BT::NodeState operator()(IShipAPI& api)
+        {
+            api.Move(time, angle);
+            return BT::NodeState::SUCCESS;
+        }
+    };
+    class AttackFunc
+    {
+    private:
+        double target_x, target_y;
+    public:
+        void set(double b, double c)
+        {
+            target_x = b, target_y = c;
+        }
+        AttackFunc(double b, double c) :
+            target_x{b},
+            target_y{c}
+        {}
+        BT::NodeState operator()(IShipAPI& api)
+        {
+            auto me = api.GetSelfInfo();
+            double x = me->x, y = me->y;
+            double angle = atan2(target_y - y, target_x - x);
+            api.Attack(angle);
+            return BT::NodeState::SUCCESS;
+        }
+    };
+    BT::SequenceNode<IShipAPI> DodgeAndAttack = {
+        BT::SequenceNode<IShipAPI>{Conditions::always, MoveFunc(0, 0)},
+        BT::SequenceNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), AttackFunc(0, 0)}
+    };
+}
 
 namespace HomeAction
 {
@@ -1151,7 +616,7 @@ namespace HomeAction
             auto res = api.SendTextMessage(id, m);
             bool success = res.get();
             std::cout << "Send:" << success << std::endl;
-            return success ? TeamBT::SUCCESS : TeamBT::FAIL;
+            return success ? BT::SUCCESS : BT::FAIL;
         };
     }
 
@@ -1161,7 +626,7 @@ namespace HomeAction
         {
             auto res = api.InstallModule(id, moduleType);
             bool success = res.get();
-            return success ? TeamBT::SUCCESS : TeamBT::FAIL;
+            return success ? BT::SUCCESS : BT::FAIL;
         };
     }
     auto BuildShip(THUAI7::ShipType shipType)
@@ -1170,7 +635,7 @@ namespace HomeAction
         {
             auto res = api.BuildShip(shipType, 0);
             bool success = res.get();
-            return success ? TeamBT::SUCCESS : TeamBT::FAIL;
+            return success ? BT::SUCCESS : BT::FAIL;
         };
     }
 
@@ -1186,7 +651,7 @@ namespace HomeAction
      public:
          SetShipMode(unsigned char ShipID, ShipMode mode) : shipID(ShipID), mode(mode){
          }
-            TeamBT::NodeState operator()(ITeamAPI& api){
+            BT::NodeState operator()(ITeamAPI& api){
                 int count = 0, id = shipID;
                 while (id)
                 {
@@ -1198,7 +663,7 @@ namespace HomeAction
                     count++;
                     id >>= 1;
                 }
-                return TeamBT::SUCCESS;
+                return BT::SUCCESS;
             }
      };
     /*
@@ -1218,7 +683,7 @@ namespace HomeAction
                 count++;
                 ShipID >>= 1;
             }
-            return TeamBT::SUCCESS;
+            return BT::SUCCESS;
         };
 
     }*/
@@ -2146,36 +1611,49 @@ void AI::play(IShipAPI& api)
             }
         }
     }
-
-
-    //ProduceMode::GetNearestResource(api);
-    
     /*
     if (Ship_Init)
     {
         nextMode = IDLE;
     }*/
-                      //  if (ShipInfo::nearBullet)
-                      //  {
-                      //      for (auto const& bullet : ShipInfo::Bullets)
-                      //      {
-                      //          double direct = bullet->facingDirection;
-                      //          double distance = euclidean_distance(bullet->x, bullet->y, ShipInfo::myself.me.x, ShipInfo::myself.me.y);
-                      //          double time = distance / bullet->speed;
-                      //          api.EndAllAction();
-                      //          api.Move(time + 10, direct + PI / 2);
-                      //          return;
-		                    //}
-                      //  }
-                      //  if (ShipInfo::nearEnemy)
-                      //  {
-                      //      if (ShipInfo::myself.me.weaponType == THUAI7::WeaponType::NullWeaponType)
-                      //      {
-		                    //	api.EndAllAction();
-
-		                    //	return;
-		                    //}
-                      //  }
+//    if (ShipInfo::nearBullet)
+//    {
+//        for (auto const& bullet : ShipInfo::Bullets)
+//        {
+//            double direct = bullet->facingDirection;
+//            double distance = euclidean_distance(bullet->x, bullet->y, ShipInfo::myself.me.x, ShipInfo::myself.me.y);
+//            double time = distance / bullet->speed;
+//            api.EndAllAction();
+//            api.Move(time + 10, direct + PI / 2);
+//            return;
+//        }
+//    }
+    for (auto const& i : ShipInfo::Enemies)
+    {
+        if (i->shipState == THUAI7::ShipState::Attacking)
+        {
+            api.EndAllAction();
+            double angle = i->facingDirection;
+            double move_angle = angle + PI / 2;
+            /*
+            int ex = i->x, ey = i->y;
+            int mx = ShipInfo::myself.me.x, my = ShipInfo::myself.me.y;
+            double dis = euclidean_distance(ex, ey, mx, my);
+            */
+            ShipAction::DodgeAndAttack.events[0].set(angle + PI / 2, 300);
+            ShipAction::DodgeAndAttack.events[1].set(i->x, i->y);
+            break;
+        } 
+    }
+    /*
+    if (ShipInfo::nearEnemy)
+    {
+        if (ShipInfo::myself.me.weaponType == THUAI7::WeaponType::NullWeaponType)
+        {
+            api.EndAllAction();
+            return;
+        }
+    }*/
 
   //  std::cout << ((nextMode == ATTACK) ? "Next ATTACK\n" : "");
   //  std::cout << ((nextMode == ROADSEARCH) ? "Next ROAD\n" : "");
@@ -2254,24 +1732,24 @@ bool BuildSecondCivil = false;
 
 volatile int Ind = 2;
 
-TeamBT::SequenceNode root = {
+BT::SequenceNode<ITeamAPI> root = {
         /*
-    new TeamBT::AlwaysSuccessNode(new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(1,PRODUCE)})),
-    new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3)})),
-    new TeamBT::AlwaysSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip)})),
-    new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip)})),
-    new TeamBT::AlwaysSuccessNode(new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(SHIP_1|SHIP_2, PRODUCE)}))
-    new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)})),
-    new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)}))
+    new BT::AlwaysSuccessNode(new BT::eventNode({Conditions::always, HomeAction::SetShipMode(1,PRODUCE)})),
+    new BT::TryUntilSuccessNode(new BT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3)})),
+    new BT::AlwaysSuccessNode(new BT::eventNode({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip)})),
+    new BT::TryUntilSuccessNode(new BT::eventNode({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip)})),
+    new BT::AlwaysSuccessNode(new BT::eventNode({Conditions::always, HomeAction::SetShipMode(SHIP_1|SHIP_2, PRODUCE)}))
+    new BT::TryUntilSuccessNode(new BT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)})),
+    new BT::TryUntilSuccessNode(new BT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)}))
          */
-    new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(1,PRODUCE)}),
-    new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
-    new TeamBT::eventNode({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipNumThreshold(2)}),
-    new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(SHIP_2, CONSTRUCT)}),
-    new TeamBT::eventNode({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(3)}),
-    new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(SHIP_3, ATTACK)}) /*
-    new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)}),
-    new TeamBT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)})*/
+    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(1,PRODUCE)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipNumThreshold(2)}),
+    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, CONSTRUCT)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(3)}),
+    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, ATTACK)}) /*
+    new BT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)}),
+    new BT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)})*/
 };
 
 
@@ -2284,7 +1762,7 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     HomeInfo::CheckInfo(api);
     if (HomeInfo::first_id != 1)
     {
-        root.events[0] = new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(1 << (HomeInfo::first_id - 1),PRODUCE)});
+        root.events[0] = new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(1 << (HomeInfo::first_id - 1),PRODUCE)});
     }
     root.perform(api);
     Commute::sync_ships(api);
@@ -2446,3 +1924,189 @@ std::deque<coordinate> search_road(int x1, int y1, THUAI7::PlaceType type, IShip
     }
 }
 */
+/*
+    **
+     * @brief 节点功能：反复执行子节点，直到返回SUCCESS
+     *
+     *
+    class TryUntilSuccessNode : public baseNode
+    {
+    public:
+        baseNode* child;
+        TryUntilSuccessNode(baseNode* x) :
+            baseNode(RUNNING),
+            child(x)
+        {
+        }
+
+        /**
+         * @brief TryUntilSuccess对应的perform虚函数
+         * @param api
+         * @return 若子节点返回SUCCESS或当前状态已经为SUCCESS，则返回SUCCESS；反之返回RUNNING
+         *
+        virtual NodeState perform(ITeamAPI& api)
+        {
+            if (state == IDLE)
+            {
+                state = RUNNING;
+            }
+            else if (state == RUNNING)
+            {
+                switch (child->perform(api))
+                {
+                    case SUCCESS:
+                        state = SUCCESS;
+                        child->state = IDLE;
+                        break;
+                    case FAIL:
+                        child->state = IDLE;
+                        break;
+                    default:
+                        break;
+                }
+            }
+            return state;
+        }
+
+        virtual ~TryUntilSuccessNode()
+        {
+            delete child;
+            child = NULL;
+        }
+    };
+
+    /**
+     * @brief decorator节点，执行一次子节点，不论子节点返回值如何，均返回SUCCESS
+     
+    class AlwaysSuccessNode : public baseNode
+    {
+    public:
+        baseNode* child;  ///< 要执行的子节点
+        AlwaysSuccessNode(baseNode* x) :
+            baseNode(IDLE),
+            child(x)
+        {
+        }
+
+        virtual NodeState perform(ITeamAPI& api)
+        {
+            if (state == IDLE)
+            {
+                state = RUNNING;
+            }
+            if (state == RUNNING)
+            {
+                switch (child->perform(api))
+                {
+                    case RUNNING:
+                        state = RUNNING;
+                        break;
+                    default:
+                        state = SUCCESS;
+                        break;
+                }
+            }
+            return state;
+        }
+
+        virtual ~AlwaysSuccessNode()
+        {
+            delete child;
+            child = NULL;
+        }
+    };
+
+    /**
+     * @brief 选择器节点，依次尝试每个子节点，直到有一个成功或全部失败
+     */
+    /*
+    class fallbackNode : public baseNode
+    {
+    private:
+        inline void ResetChildren()
+        {
+            for (size_t i = 0; i < events.size(); i++)
+            {
+                events[i]->state = IDLE;
+            }
+            curChild = 0;
+        }
+
+    public:
+        std::vector<baseNode*> events;
+        int curChild;
+*/
+        /**
+         * @brief 选择器节点的perform函数
+         * - 如果当前子节点返回SUCCESS，则重置全部子节点状态，本节点状态设为SUCCESS并返回SUCCESS
+         * - 如果当前子节点返回RUNNING，下一次调用时仍调用该子节点，直到它返回FAIL或SUCCESS；返回RUNNING
+         * - 如果当前子节点返回FAIL
+         *  . 如果已经是最后一个子节点，则本节点状态为FAIL，返回FAIL
+         *  . 否则下一次调用执行下一个子节点，本次返回RUNNING
+         * @param api
+         * @return
+     */
+    /*
+        virtual NodeState perform(ITeamAPI& api)
+        {
+            switch (state)
+            {
+                case IDLE:
+                    state = RUNNING;
+                    break;
+                case RUNNING:
+                    break;
+                default:
+                    return state;
+                    break;
+            }
+
+            switch (events[curChild]->perform(api))
+            {
+                case RUNNING:
+                    break;
+                case FAIL:
+                    if (curChild == events.size() - 1)
+                    {
+                        state = FAIL;
+                        ResetChildren();
+                    }
+                    else
+                    {
+                        curChild++;
+                    }
+                    break;
+                case SUCCESS:
+                    state = SUCCESS;
+                    ResetChildren();
+                    break;
+                default:
+                    break;
+            }
+            return state;
+        }
+
+        fallbackNode(std::initializer_list<baseNode*> l) :
+            events(l),
+            curChild(0)
+        {
+        }
+
+        fallbackNode(const fallbackNode& a) :
+            curChild(0)
+        {
+            for (size_t i = 0; i < a.events.size(); i++)
+            {
+                events.push_back(new auto(*a.events[i]));
+            }
+        }
+
+        virtual ~fallbackNode()
+        {
+            for (size_t i = 0; i < events.size(); i++)
+            {
+                delete events[i];
+                events[i] = NULL;
+            }
+        }
+    };*/
