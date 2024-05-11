@@ -1129,8 +1129,15 @@ namespace Conditions
     auto ShipNumThreshold(int threshold)
     {
 		return [threshold](ITeamAPI& api)
-        { return (api.GetShips().size() >= threshold); };
+        { return (HomeInfo::MyShips.size() >= threshold); };
 	}
+    auto ShipHasProducer(int shipID, THUAI7::ProducerType type)
+    {
+        return [=](ITeamAPI& api) {
+            return HomeInfo::MyShips[shipID - 1].producerType == type;
+        };
+    
+    }
 }  
 
 namespace HomeAction
@@ -1718,7 +1725,7 @@ namespace RoadSearchMode
     {
         if (path.empty())
         {
-            if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos) <= 2)
+            if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos) <= 1)
             {
                 return {
                     IDLE,
@@ -1801,7 +1808,11 @@ namespace RoadSearchMode
             double time = sqrt(dx * dx + dy * dy) / 3.0;
             double angle = atan2(dy, dx);
             std::cout << "time: " << time << " angle: " << angle << std::endl;
-            api.Move(time, angle);
+            auto res = api.Move(time, angle);
+            if (!res.get())
+            {
+                std::cout << "move fail"; 
+            }
         }
         return {
             ROADSEARCH,
@@ -1842,9 +1853,9 @@ namespace ConstructMode
     {
         //if (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1.5)
         if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1)
-        if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1)
         {
-            if (api.GetConstructionState(ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y).second == 0)
+            auto res = api.GetConstructionState(ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y);
+            if (res.second <= 0)
             {
                 if (ShipInfo::myself.me.shipState != THUAI7::ShipState::Constructing)
                 {
@@ -2245,7 +2256,7 @@ TeamBT::SequenceNode root = {
     new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)}))
          */
     new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(1,PRODUCE)}),
-    new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3)}),
+    new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
     new TeamBT::eventNode({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipNumThreshold(2)}),
     new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(SHIP_2, CONSTRUCT)}),
     new TeamBT::eventNode({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(3)})/*,
