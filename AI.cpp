@@ -123,7 +123,7 @@ namespace Commute
 {
     struct Buffer
     {
-        ShipMode Mode;
+        ShipMode Mode = IDLE;
         unsigned char ModeParam;
         bool with_target;
         coordinate target;
@@ -147,7 +147,7 @@ namespace Commute
 namespace HomeInfo
 {
 
-    int UsableShip[4] = {0};
+    int UsableShip[5] = {0};
     int MyScore = 0;
     int EnemyScore = 0;
     int MyMoney = 0;
@@ -160,11 +160,13 @@ namespace HomeInfo
 
     // 为什么不用shared_ptr<const THUAI7::Ship>?
     std::vector<THUAI7::Ship> MyShips, EnemyShips, EnemyShipsInSight;
+    int index_to_id[4], ship_cnt = 0;
 
     /**
      * @brief 给舰船发送信息的缓冲区
+     * 下标为playerID
      */
-    Commute::Buffer TeamShipBuffer[4];
+    Commute::Buffer TeamShipBuffer[5];
 
     int init = 1;
 
@@ -322,6 +324,7 @@ namespace ShipInfo
      * @brief 信息接收缓冲区
      */
     Commute::Buffer ShipBuffer;
+    Commute::ReportBuffer ReportBuffer;
 
     THUAI7::ConstructionType constructType = THUAI7::ConstructionType::Factory;
 
@@ -797,44 +800,23 @@ namespace HomeAction
          unsigned char shipID;
          ShipMode mode;
      public:
-         SetShipMode(unsigned char ShipID, ShipMode mode) : shipID(ShipID), mode(mode){
+         SetShipMode(unsigned char ShipID, ShipMode mode) : shipID(ShipID), mode(mode){}
+
+         BT::NodeState operator()(ITeamAPI& api)
+         {
+             int count;
+             unsigned char id = shipID;
+             for (count = 0; id; count++, id >>= 1)
+             {
+                 int tmp = id & 1;
+                 if (tmp)
+                 {
+                     HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[count]].Mode = mode;
+                 }
+             }
+             return BT::SUCCESS;
          }
-            BT::NodeState operator()(ITeamAPI& api){
-                int count = 0, id = shipID;
-                while (id)
-                {
-                    int tmp = id & 1;
-                    if (tmp)
-                    {
-                        HomeInfo::TeamShipBuffer[count].Mode = mode;
-                    }
-                    count++;
-                    id >>= 1;
-                }
-                return BT::SUCCESS;
-            }
      };
-    /*
-    auto SetShipMode(unsigned char ShipID, ShipMode mode)
-    {
-        return [&](ITeamAPI& api)
-        {
-            int count = 0;
-            while (ShipID)
-            {
-
-                int tmp = ShipID&1;
-                if (tmp)
-                {
-                    HomeInfo::TeamShipBuffer[count].Mode = mode;
-                }
-                count++;
-                ShipID >>= 1;
-            }
-            return BT::SUCCESS;
-        };
-
-    }*/
 }
 
 
@@ -851,7 +833,7 @@ namespace revenge
 
 namespace HomeInfo
 {
-    int first_id;
+    //int first_id;
     void CheckInfo(ITeamAPI& api)
     {
         //初始化地图并确定我方颜色
@@ -859,25 +841,42 @@ namespace HomeInfo
         {
             MapInfo::LoadFullMap(api);
             MySide = (api.GetSelfInfo()->teamID == 0) ? RED : BLUE;
-            for (size_t i = 0; i < 4; i++)
+            /*
+            for (size_t i = 1; i <= 4; i++)
             {
                 TeamShipBuffer[i].Mode = IDLE;
-            }
+            }*/
         }
 
         //刷新我方舰船及我方、对方基地坐标
         {
             auto sps = api.GetShips();
             MyShips.clear();
-            memset(UsableShip, 0, 4 * sizeof(int));
+            //memset(UsableShip, 0, 4 * sizeof(int));
+            bool temp[5] = {0};
             for (size_t i = 0; i < sps.size(); i++)
             {
                 MyShips.push_back(*sps[i]);
-                UsableShip[sps[i]->playerID - 1] = 1;
+                int id = sps[i]->playerID;
+                if (UsableShip[id] == false)
+                {
+                    index_to_id[ship_cnt] = id;
+                    ship_cnt++;
+                }
+                temp[id] == true;
+            }
+            for (int i = 1; i <= 4; i++)
+            {
+                if (UsableShip[i] and !temp[i])
+                {
+                    //TODO
+                    //设置复活
+                }
+                UsableShip[i] = temp[i];
             }
             if (init)
             {
-                first_id = MyShips[0].playerID;
+                //first_id = MyShips[0].playerID;
                 coordinate tmp(MyShips[0].x / 1000, MyShips[0].y/1000);
                 /*
                 for (size_t i = 0; i < 2; i++)
@@ -982,20 +981,39 @@ namespace Commute
             return true;
         }
     }
-
-
-
-
     void sync_ships(ITeamAPI& api)
     {
-        for (size_t i = 0; i < HomeInfo::MyShips.size(); i++)
+        //for (size_t i = 0; i < HomeInfo::MyShips.size(); i++)
+        for (auto const& ship : HomeInfo::MyShips)
         {
-            int index = HomeInfo::MyShips[i].playerID;
+            int index = ship.playerID;
             std::string message;
             message.resize(BUFFER_SIZE + 1);
-            memcpy(message.data(), &HomeInfo::TeamShipBuffer[i], BUFFER_SIZE);
+            memcpy(message.data(), &HomeInfo::TeamShipBuffer[index], BUFFER_SIZE);
             //message[BUFFER_SIZE] = '\0';
             api.SendBinaryMessage(index, message);
+        }
+    }
+    void report(IShipAPI& api)
+    {
+        if (ShipInfo::ReportBuffer.instruction == 0)
+        {
+			return;
+		}
+        std::string message;
+        message.resize(REPORTBUFFER_SIZE + 1);
+        memcpy(message.data(), &ShipInfo::ReportBuffer, REPORTBUFFER_SIZE);
+        api.SendBinaryMessage(0, message);
+    }
+    std::vector<ReportBuffer> reports;
+    void receive_message(ITeamAPI& api)
+    {
+        while (api.HaveMessage())
+        {
+            std::string message = api.GetMessage().second;
+            Commute::ReportBuffer temp;
+            memcpy(&temp, message.data(), REPORTBUFFER_SIZE);
+            reports.push_back(std::move(temp));
         }
     }
 
@@ -1653,11 +1671,11 @@ void AI::play(IShipAPI& api)
         {
             nextMode = ShipInfo::myself.mode = ShipInfo::ShipBuffer.Mode;
             clear(api);
-            switch (ShipInfo::ShipBuffer.Mode)
+            /* switch (ShipInfo::ShipBuffer.Mode)
             {
                 default:
                     break;
-            }
+            }*/
         }
     }
     /*
@@ -1701,13 +1719,14 @@ void AI::play(IShipAPI& api)
             break;
         }
         //只是测试用
+        /*
         else if (MapInfo::MySide == BLUE)
         {
             int ex = i->x, ey = i->y;
             int mx = ShipInfo::myself.me.x, my = ShipInfo::myself.me.y;
             double angle = atan2(ey - my, ex - mx);
             api.Attack(angle);
-        }
+        }*/
     }
     callStack.top()(api);
     //ShipStep(api);
@@ -1807,7 +1826,7 @@ BT::SequenceNode<ITeamAPI> root = {
     new BT::TryUntilSuccessNode(new BT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)})),
     new BT::TryUntilSuccessNode(new BT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)}))
          */
-    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(1,PRODUCE)}),
+    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_1,PRODUCE)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipNumThreshold(2)}),
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, CONSTRUCT)}),
@@ -1825,12 +1844,19 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
 {
 
     HomeInfo::CheckInfo(api);
+    /*
     if (HomeInfo::first_id != 1)
     {
         root.events[0] = new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(1 << (HomeInfo::first_id - 1),PRODUCE)});
-    }
+    }*/
     root.perform(api);
     Commute::sync_ships(api);
+    std::this_thread::sleep_for(std::chrono::milliseconds(15));
+    Commute::receive_message(api);
+    if (!Commute::reports.empty())
+    {
+
+    }
 }
 
 /*
