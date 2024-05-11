@@ -1551,8 +1551,8 @@ namespace AttackMode
                 api.EndAllAction();
             }
 
-            //double angle = atan2(ShipInfo::myself.TargetPos.y * 1000 + 500 - ShipInfo::myself.me.y, ShipInfo::myself.TargetPos.x * 1000 + 500 - ShipInfo::myself.me.x);
-            double angle = -0.3;
+            double angle = atan2(ShipInfo::myself.TargetPos.y * 1000 + 500 - ShipInfo::myself.me.y, ShipInfo::myself.TargetPos.x * 1000 + 500 - ShipInfo::myself.me.x);
+            //double angle = -0.3;
             std::cout << "mydirect: " << ShipInfo::myself.me.facingDirection << std::endl;
             std::cout << "angle: " << angle << std::endl;
             api.Attack(angle);
@@ -1690,7 +1690,15 @@ void AI::play(IShipAPI& api)
             callStack.push(WrapperFunc([dodgeNode](IShipAPI& api)
                                      { return dodgeNode->perform(api); }));
             break;
-        } 
+        }
+        //只是测试用
+        else if (MapInfo::MySide == BLUE)
+        {
+            int ex = i->x, ey = i->y;
+            int mx = ShipInfo::myself.me.x, my = ShipInfo::myself.me.y;
+            double angle = atan2(ey - my, ex - mx);
+            api.Attack(angle);
+        }
     }
     callStack.top()(api);
     //ShipStep(api);
