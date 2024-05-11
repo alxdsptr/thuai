@@ -1388,7 +1388,7 @@ namespace ShipInfo
      */
     Commute::Buffer ShipBuffer;
 
-
+    THUAI7::ConstructionType constructType = THUAI7::ConstructionType::Factory;
 
 
     /**
@@ -1410,7 +1410,13 @@ namespace ShipInfo
         Bullets = std::move(bullets);
 
         auto fri = api.GetShips();
-        FriendShips = std::move(fri);
+        FriendShips.clear();
+        for (auto const& ship : fri)
+        {
+            if (ship->playerID == myself.me.playerID)
+                continue;
+            FriendShips.push_back(ship);
+        }
 
 
         //Enemies.clear();
@@ -1538,13 +1544,13 @@ namespace RoadSearchMode
     };
 
 
-            auto is_empty = [](int x,int y)
-            {
-                MapInfo::Place t = MapInfo::fullmap[x][y];
-                return (t == MapInfo::Space or t == MapInfo::Shadow or t == MapInfo::OpenWormhole);
-                //THUAI7::PlaceType t = MapInfo::map[x][y];
-                //return (t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole);
-            };
+    auto is_empty = [](int x,int y)
+    {
+        MapInfo::Place t = MapInfo::fullmap[x][y];
+        return (t == MapInfo::Space or t == MapInfo::Shadow or t == MapInfo::OpenWormhole);
+        //THUAI7::PlaceType t = MapInfo::map[x][y];
+        //return (t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole);
+    };
     std::deque<coordinate> search_road(int x1, int y1, int x2, int y2)
     {
         std::priority_queue<node> pq;
@@ -1733,16 +1739,35 @@ namespace RoadSearchMode
         {
             //bool direct_move = true;
             std::vector<std::pair<coordinate, MapInfo::Place>> temp;
+            THUAI7::Ship& me = ShipInfo::myself.me;
             for (auto const& ship : ShipInfo::FriendShips)
             {
-                if (ship->playerID == ShipInfo::myself.me.playerID)
-					continue;
-                int x = ship->x / 1000, y = ship->y / 1000;
+                int x = ship->x / 1000, y = ship->y / 1000, lx = ship->x % 1000, ly = ship->y % 1000;
                 int mx = ShipInfo::myself.me.x / 1000, my = ShipInfo::myself.me.y / 1000;
-                if (euclidean_distance(x, y, mx, my) < 1.5)
+                auto saveAndChange = [&temp](int x, int y)
                 {
                     temp.push_back({{x, y}, MapInfo::fullmap[x][y]});
                     MapInfo::fullmap[x][y] = MapInfo::Place::Ruin;
+                };
+                if (euclidean_distance(ship->x, ship->y, me.x, me.y) < 2000)
+                {
+                    saveAndChange(x, y);
+                    if (lx <= 420)
+                    {
+                        saveAndChange(x - 1, y);
+                    }
+                    else if (lx >= 580)
+                    {
+                        saveAndChange(x + 1, y);
+                    }
+                    if (ly <= 420)
+                    {
+                        saveAndChange(x, y - 1);
+                    }
+                    else if (ly >= 580)
+                    {
+                        saveAndChange(x, y + 1);
+                    }
                 }
             }
             /*
@@ -1790,6 +1815,105 @@ namespace RoadSearchMode
     }
 
 }
+namespace ConstructMode
+{
+    bool GetNearestConstruction(IShipAPI& api)
+    {
+        coordinate tmp;
+        int x = ShipInfo::myself.me.x / 1000;  //<格子数
+        int y = ShipInfo::myself.me.y / 1000;  //<格子数
+        int minDis = 0x7fffffff;
+        if (MapInfo::PositionLists[MapInfo::Construction].empty())
+        {
+			return false;
+		}
+        for (auto const& c : MapInfo::PositionLists[MapInfo::Construction])
+        {
+            if (manhatten_distance(x, y, c) < minDis)
+            {
+				tmp = c, minDis = manhatten_distance(x, y, c);
+			}
+		}
+        ShipInfo::myself.TargetPos = tmp;
+        return true;
+    }
+
+    ModeRetval Perform(IShipAPI& api)
+    {
+        //if (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1.5)
+        if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1)
+        if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1)
+        {
+            if (api.GetConstructionState(ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y).second == 0)
+            {
+                if (ShipInfo::myself.me.shipState != THUAI7::ShipState::Constructing)
+                {
+                    api.EndAllAction();
+                    api.Construct(ShipInfo::constructType);
+                }
+                return
+                {
+                    CONSTRUCT,
+                    false
+                };
+            }
+            else
+            {
+                MapInfo::PositionLists[MapInfo::Construction].erase(ShipInfo::myself.TargetPos);
+
+                    if (GetNearestConstruction(api))
+                    {
+                        RoadSearchMode::end_condition = [](IShipAPI& api)
+                        {
+                            //if (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1.5)
+                            if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1)
+                            {
+                                return true;
+                            }
+                            else
+                            {
+                                return false;
+                            }
+                        };
+
+                        return {
+                            ROADSEARCH,
+                            true
+                        };
+                    }
+                    else
+                    {
+                        return {
+                            IDLE,
+                            false
+                        };
+                    }
+            }
+        }
+        else
+        {
+            if (GetNearestConstruction(api))
+            {
+                return {
+                    ROADSEARCH,
+                    true
+                };
+            }
+            else
+            {
+                return {
+                    IDLE,
+                    false
+                };
+            }
+        }
+    }
+
+    void Clear(IShipAPI& api)
+    {
+
+    }
+}
 
 namespace ProduceMode
 {
@@ -1816,7 +1940,8 @@ namespace ProduceMode
 
     ModeRetval Perform(IShipAPI& api)
     {
-        if (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1.5)
+        //if (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1.5)
+        if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1)
         {
             if (api.GetResourceState(ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y))
             {
@@ -1839,7 +1964,8 @@ namespace ProduceMode
                     {
                         RoadSearchMode::end_condition = [](IShipAPI& api)
                         {
-                            if (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1.5)
+                            //if (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1.5)
+                            if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1)
                             {
                                 return true;
                             }
@@ -2066,7 +2192,8 @@ void AI::play(IShipAPI& api)
 		}
         else if (nextMode == CONSTRUCT)
         {
-		
+			ModeRetval res = ConstructMode::Perform(api);
+			nextMode = res.mode;
 		}
         else if (nextMode == ROB)
         {
@@ -2117,10 +2244,10 @@ TeamBT::SequenceNode root = {
     new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)})),
     new TeamBT::TryUntilSuccessNode(new TeamBT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)}))
          */
-    //new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(1,PRODUCE)}),
+    new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(1,PRODUCE)}),
     new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3)}),
     new TeamBT::eventNode({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipNumThreshold(2)}),
-    //new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(SHIP_1|SHIP_2, PRODUCE)}),
+    new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(SHIP_2, CONSTRUCT)}),
     new TeamBT::eventNode({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(3)})/*,
     new TeamBT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)}),
     new TeamBT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)})*/
@@ -2139,7 +2266,7 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
         root.events[0] = new TeamBT::eventNode({Conditions::always, HomeAction::SetShipMode(1 << (HomeInfo::first_id - 1),PRODUCE)});
     }
     root.perform(api);
-    //Commute::sync_ships(api);
+    Commute::sync_ships(api);
 }
 
 /*
