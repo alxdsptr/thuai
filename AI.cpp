@@ -740,7 +740,7 @@ namespace Conditions
             return HomeInfo::MyShips[shipID - 1].shieldType == type;
         };
     }
-    auto ShipWeapon(int shipID, THUAI7::WeaponType type)
+    auto ShipHasWeapon(int shipID, THUAI7::WeaponType type)
     {
         return [=](ITeamAPI& api)
         {
@@ -2310,6 +2310,10 @@ BT::SequenceNode<ITeamAPI> root = {
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(3, THUAI7::ModuleType::ModuleArmor3), Conditions::ShipHasArmor(3, THUAI7::ArmorType::Armor3)}),
 
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(3, THUAI7::ModuleType::ModuleShield3), Conditions::ShipHasShield(3, THUAI7::ShieldType::Shield3)}),
+
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun), Conditions::ShipHasWeapon(1, THUAI7::WeaponType::LaserGun)}),
+
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleLaserGun), Conditions::ShipHasWeapon(2, THUAI7::WeaponType::LaserGun)}),
 
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleArmor3), Conditions::ShipHasArmor(1, THUAI7::ArmorType::Armor3)}),
 
