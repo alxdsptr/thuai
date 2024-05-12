@@ -3,6 +3,16 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+.idea
+AI-4.cpp
+AI-5.cpp
+API.cpp
+Communication.cpp
+logic.cpp
+main.cpp
+DebugAPI.cpp
+main.cpp
+AI(2).cpp
 # User-specific files
 *.rsuser
 *.suo
