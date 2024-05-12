@@ -54,7 +54,7 @@ extern const std::array<THUAI7::ShipType, 4> ShipTypeDict = {
     THUAI7::ShipType::CivilianShip,
     THUAI7::ShipType::CivilianShip,
     THUAI7::ShipType::MilitaryShip,
-    THUAI7::ShipType::FlagShip,
+    THUAI7::ShipType::MilitaryShip,
 };
  
 // 可以在AI.cpp内部声明变量与函数
@@ -717,6 +717,34 @@ namespace Conditions
     {
         return [=](ITeamAPI& api) {
             return HomeInfo::MyShips[shipID - 1].producerType == type;
+        };
+    }
+    auto ShipHasConstructor(int shipID, THUAI7::ConstructorType type)
+    {
+        return [=](ITeamAPI& api)
+        {
+            return HomeInfo::MyShips[shipID - 1].constructorType == type;
+        };
+    }
+    auto ShipHasArmor(int shipID, THUAI7::ArmorType type)
+    {
+        return [=](ITeamAPI& api)
+        {
+            return HomeInfo::MyShips[shipID - 1].armorType == type;
+        };
+    }
+    auto ShipHasShield(int shipID, THUAI7::ShieldType type)
+    {
+        return [=](ITeamAPI& api)
+        {
+            return HomeInfo::MyShips[shipID - 1].shieldType == type;
+        };
+    }
+    auto ShipWeapon(int shipID, THUAI7::WeaponType type)
+    {
+        return [=](ITeamAPI& api)
+        {
+            return HomeInfo::MyShips[shipID - 1].weaponType == type;
         };
     }
     auto JudgeSelfState(THUAI7::ShipState state)
@@ -1661,11 +1689,53 @@ namespace ProduceMode
 namespace AttackMode
 {
 
-
+    int getHp(IShipAPI& api,coordinate tar)
+    {
+        THUAI7::PlaceType tmp = MapInfo::map[tar.x][tar.y];
+        switch (tmp)
+        {
+            case THUAI7::PlaceType::NullPlaceType:
+                return 0;
+                break;
+            case THUAI7::PlaceType::Home:
+                return (MapInfo::MySide == RED) ? (api.GetGameInfo()->blueHomeHp) : (api.GetGameInfo()->redHomeHp);
+                break;
+            case THUAI7::PlaceType::Space:
+                return 0;
+                break;
+            case THUAI7::PlaceType::Ruin:
+                return 0;
+                break;
+            case THUAI7::PlaceType::Shadow:
+                return 0;
+                break;
+            case THUAI7::PlaceType::Asteroid:
+                return 0;
+                break;
+            case THUAI7::PlaceType::Resource:
+                return 0;
+                break;
+            case THUAI7::PlaceType::Construction:
+                return api.GetConstructionState(tar.x, tar.y).second;
+                break;
+            case THUAI7::PlaceType::Wormhole:
+                return api.GetWormholeHp(tar.x, tar.y);
+                break;
+            default:
+                break;
+        }
+    }
     ModeRetval Perform(IShipAPI& api)
     {
         if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, ShipInfo::myself.TargetPos.x*1000+500, ShipInfo::myself.TargetPos.y*1000+500) <= WeaponToDis(ShipInfo::myself.me.weaponType) + 200)
         {
+            if (getHp(api,ShipInfo::myself.TargetPos)==0)
+            {
+                return {
+                    IDLE,
+                    false
+                };
+            }
             if (ShipInfo::myself.me.shipState != THUAI7::ShipState::Idle)
             {
                 api.EndAllAction();
@@ -1711,7 +1781,7 @@ void (*clear_list[3])(IShipAPI&) = {&(IdleMode::Clear), &(RoadSearchMode::Clear)
 
 
 
-ShipMode nextMode=ATTACK;
+ShipMode nextMode=IDLE;
 
 
 void ShipStep(IShipAPI &api);
@@ -1970,7 +2040,7 @@ void AI::play(IShipAPI& api)
     ShipInfo::CheckInfo(api);
     if (Ship_Init)
     {
-        nextMode = (api.GetSelfInfo()->playerID == 3 ? ATTACK : PRODUCE);
+        nextMode = IDLE;
         callStack.push(&ShipStep);
         Ship_Init = 0;
     }
@@ -2079,29 +2149,38 @@ void AI::play(IShipAPI& api)
         }
     }
 
-
-
-    if (!interrupt_codeRecorder.size())
+    for (auto const& i : ShipInfo::Enemies)
     {
-        for (auto const& i : ShipInfo::Enemies)
+        if (i->shipState == THUAI7::ShipState::Attacking)
         {
-            if (manhatten_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y,i->x,i->y)<=8000 && abs(atan2(ShipInfo::myself.me.y - i->y, ShipInfo::myself.me.x - i->x) - i->facingDirection) <= PI / 36)
-            {
-                interrupt_codeRecorder.push(1);
-                callStack.push(detectEnemy);
-                break;
-            }
-            // 只是测试用
-            /*
-            else if (MapInfo::MySide == BLUE)
-            {
-                int ex = i->x, ey = i->y;
-                int mx = ShipInfo::myself.me.x, my = ShipInfo::myself.me.y;
-                double angle = atan2(ey - my, ex - mx);
-                api.Attack(angle);
-            }*/
+            api.EndAllAction();
+            double angle = i->facingDirection;
+            double move_angle = angle + PI / 2;
+            // BT::SequenceNode<IShipAPI> dodgeNode{
+            auto dodgeNode = new BT::SequenceNode<IShipAPI>{
+                new BT::eventNode<IShipAPI>{Conditions::always_ship, ShipAction::MoveFunc(move_angle, 200)},
+                new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), ShipAction::AttackFunc(i->x, i->y)},
+            };
+
+            callStack.push(WrapperFunc([dodgeNode](IShipAPI& api)
+                                       { return dodgeNode->perform(api); }));
+            break;
         }
+
     }
+
+    //if (!interrupt_codeRecorder.size())
+    //{
+    //    for (auto const& i : ShipInfo::Enemies)
+    //    {
+    //        if (i->weaponType!=THUAI7::WeaponType::NullWeaponType&&manhatten_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y,i->x,i->y)<=6000 && abs(atan2(ShipInfo::myself.me.y - i->y, ShipInfo::myself.me.x - i->x) - i->facingDirection) <= PI / 36)
+    //        {
+    //            interrupt_codeRecorder.push(1);
+    //            callStack.push(detectEnemy);
+    //            break;
+    //        }
+    //    }
+    //}
     std::cout << ShipInfo::myself.mode << std::endl;
     callStack.top()(api);
 
@@ -2204,11 +2283,46 @@ BT::SequenceNode<ITeamAPI> root = {
     new BT::TryUntilSuccessNode(new BT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)}))
          */
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_1,PRODUCE)}),
+
+
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipNumThreshold(2)}),
-    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, PRODUCE)}),
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(3)}),
-    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, ATTACK,MODEPARAM_AttackHome)}) 
+
+
+
+
+
+
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(2)}),
+    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, ATTACK, MODEPARAM_AttackHome)}), 
+
+
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipNumThreshold(3)}),
+    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, CONSTRUCT, MODEPARAM_ConstructFactory)}),
+
+
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleConstructor3), Conditions::ShipHasConstructor(2, THUAI7::ConstructorType::Constructor3)}),
+
+
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(4)}),
+
+    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_4, ATTACK, MODEPARAM_AttackHome)}),
+
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(3, THUAI7::ModuleType::ModuleArmor3), Conditions::ShipHasArmor(3, THUAI7::ArmorType::Armor3)}),
+
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(3, THUAI7::ModuleType::ModuleShield3), Conditions::ShipHasShield(3, THUAI7::ShieldType::Shield3)}),
+
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleArmor3), Conditions::ShipHasArmor(1, THUAI7::ArmorType::Armor3)}),
+
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleShield3), Conditions::ShipHasShield(1, THUAI7::ShieldType::Shield3)}),
+
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleArmor3), Conditions::ShipHasArmor(2, THUAI7::ArmorType::Armor3)}),
+
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleShield3), Conditions::ShipHasShield(2, THUAI7::ShieldType::Shield3)}),
+
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(4, THUAI7::ModuleType::ModuleArmor3), Conditions::ShipHasArmor(4, THUAI7::ArmorType::Armor3)}),
+
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(4, THUAI7::ModuleType::ModuleShield3), Conditions::ShipHasShield(4, THUAI7::ShieldType::Shield3)})
+
     /*
     new BT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)}),
     new BT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)})*/
@@ -2308,7 +2422,7 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     }*/
     root.perform(api);
     Commute::sync_ships(api);
-    std::this_thread::sleep_for(std::chrono::milliseconds(15));
+    //std::this_thread::sleep_for(std::chrono::milliseconds(15));
 
 }
 
