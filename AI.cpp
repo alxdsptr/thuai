@@ -838,6 +838,8 @@ namespace HomeAction
         };
     }
 
+
+    coordinate tmp_coordinate = {-1, -1};
     /**
      * @brief 设置（多艘）舰船状态
      * @param ShipID 支持按位或来同时设置多个舰船的状态
@@ -847,10 +849,10 @@ namespace HomeAction
      class SetShipMode{
          unsigned char shipID;
          ShipMode mode;
-         coordinate target;
+         coordinate& target;
          unsigned char ModeParam;
      public:
-         SetShipMode(unsigned char ShipID, ShipMode mode, unsigned char ModeParam = MODEPARAM_ConstructFactory, coordinate target = {-1, -1}) :
+         SetShipMode(unsigned char ShipID, ShipMode mode, unsigned char ModeParam = MODEPARAM_ConstructFactory, coordinate& target = tmp_coordinate) :
              shipID(ShipID),
              mode(mode),
              target(target),
@@ -1985,9 +1987,10 @@ void AI::play(IShipAPI& api)
                         ShipInfo::myself.TargetPos = ShipInfo::ShipBuffer.target;
                         
                     }
-                    ShipInfo::myself.mode = PRODUCE;
+                    nextMode = ShipInfo::myself.mode = PRODUCE;
                     break;
                 case CONSTRUCT:
+                    nextMode = ShipInfo::myself.mode = CONSTRUCT;
                     if (ShipInfo::ShipBuffer.with_target)
                     {
                         ShipInfo::myself.TargetPos = ShipInfo::ShipBuffer.target;
@@ -2192,7 +2195,7 @@ BT::SequenceNode<ITeamAPI> root = {
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipNumThreshold(2)}),
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, PRODUCE)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(3)})
-    //new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, ATTACK,0,*(MapInfo::PositionLists[MapInfo::EnemyHome].begin()))}) 
+    //new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, ATTACK,1,(coordinate &)(*(MapInfo::PositionLists[MapInfo::EnemyHome].begin())))}) 
     /*
     new BT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)}),
     new BT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)})*/
