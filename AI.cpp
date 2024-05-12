@@ -422,6 +422,34 @@ double euclidean_distance(double x1, double y1, double x2, double y2)
 {
 	return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2));
 };
+double WeaponToDis(THUAI7::WeaponType p)
+{
+    switch (p)
+    {
+        case THUAI7::WeaponType::NullWeaponType:
+            return 0;
+            break;
+        case THUAI7::WeaponType::LaserGun:
+            return 4000;
+            break;
+        case THUAI7::WeaponType::PlasmaGun:
+            return 4000;
+            break;
+        case THUAI7::WeaponType::ShellGun:
+            return 4000;
+            break;
+        case THUAI7::WeaponType::MissileGun:
+            return 8000;
+            break;
+        case THUAI7::WeaponType::ArcGun:
+            return 8000;
+            break;
+        default:
+            break;
+    }
+}
+
+
 
 
 namespace BT
@@ -1045,7 +1073,7 @@ namespace IdleMode
 
 namespace AttackMode
 {
-    double WeaponToDis(THUAI7::WeaponType p);
+
 }
 
 namespace RoadSearchMode
@@ -1060,7 +1088,7 @@ namespace RoadSearchMode
     */
     std::function<bool(IShipAPI& api)> end_condition = [](IShipAPI& api)
     {
-        if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= AttackMode::WeaponToDis(ShipInfo::myself.me.weaponType) + 200 && api.HaveView(ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y))
+        if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= WeaponToDis(ShipInfo::myself.me.weaponType) + 200 && api.HaveView(ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y))
         {
             return true;
         }
@@ -1542,32 +1570,7 @@ namespace ProduceMode
 
 namespace AttackMode
 {
-    double WeaponToDis(THUAI7::WeaponType p)
-    {
-        switch (p)
-        {
-            case THUAI7::WeaponType::NullWeaponType:
-                return 0;
-                break;
-            case THUAI7::WeaponType::LaserGun:
-                return 4000;
-                break;
-            case THUAI7::WeaponType::PlasmaGun:
-                return 4000;
-                break;
-            case THUAI7::WeaponType::ShellGun:
-                return 4000;
-                break;
-            case THUAI7::WeaponType::MissileGun:
-                return 8000;
-                break;
-            case THUAI7::WeaponType::ArcGun:
-                return 8000;
-                break;
-            default:
-                break;
-        }
-    }
+
 
     ModeRetval Perform(IShipAPI& api)
     {
@@ -1653,6 +1656,188 @@ void clear(IShipAPI& api)
        clear(api);
     }
 }
+
+/**
+ * @brief 检测我方是否在对方射程内
+ * @param x 敌方x坐标
+ * @param y 敌方y坐标
+ * @param weapondistance 武器射程 
+ * @return 
+ */
+inline bool In_ShootingDistance(int x, int y, int weapondistance)
+{
+    if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y,x,y)<=weapondistance+400+800)
+    {
+        return true;
+
+    }
+    else
+    {
+        return false;
+    }
+}
+
+/**
+ * @brief 判断伤害大小
+ * @param weapon 武器类型
+ * @param towhich 0表示本体，1表示装甲，2表示护盾
+ * @return 
+ */
+inline int WeaponToDamage(THUAI7::WeaponType weapon, unsigned char towhich)
+{
+    int damage=0, mag=0;
+    switch (weapon)
+    {
+        case THUAI7::WeaponType::NullWeaponType:
+            damage = 0, mag = 0;
+            break;
+        case THUAI7::WeaponType::LaserGun:
+            damage = 1200, mag = (towhich == 0) ? 1 : (towhich == 1 ? 1.5 : 0.6);
+            break;
+        case THUAI7::WeaponType::PlasmaGun:
+            damage = 1300, mag = (towhich == 0) ? 1 : (towhich == 1 ? 2 : 0.4);
+            break;
+        case THUAI7::WeaponType::ShellGun:
+            damage = 1800, mag = (towhich == 0) ? 1 : (towhich == 1 ? 0.4 : 1.5);
+            break;
+        case THUAI7::WeaponType::MissileGun:
+            damage = 1600, mag = (towhich == 0) ? 1 : (towhich == 1 ? 1 : 1000);
+            break;
+        case THUAI7::WeaponType::ArcGun:
+            damage = 3200, mag = (towhich == 0) ? 1 : (towhich == 1 ? 2 : 2);
+            break;
+        default:
+            break;
+    }
+    return damage * mag;
+}
+
+
+struct health
+{
+    int hp;
+    int armor;
+    int shield;
+
+    void operator-=(THUAI7::WeaponType a)
+    {
+        if (a == THUAI7::WeaponType::MissileGun)
+        {
+            if (armor>0)
+            {
+                int dam = WeaponToDamage(a, 1);
+                armor = (dam > armor) ? 0 : (armor - dam);
+            }
+            else if (hp>0)
+            {
+                int dam = WeaponToDamage(a, 0);
+                hp = (dam > hp) ? 0 : (hp - dam);
+            }
+        }
+        else
+        {
+            if (shield>0)
+            {
+                int dam = WeaponToDamage(a, 2);
+                shield = (dam > shield) ? 0 : (shield - dam);
+            }
+            else if (armor > 0)
+            {
+                int dam = WeaponToDamage(a, 1);
+                armor = (dam > armor) ? 0 : (armor - dam);
+            }
+            else if (hp > 0)
+            {
+                int dam = WeaponToDamage(a, 0);
+                hp = (dam > hp) ? 0 : (hp - dam);
+            }
+        }
+        
+    }
+};
+
+/**
+ * @brief 判断能否打过
+ * @param enemy 对应的敌舰
+ * @return 0：打不过；1：打得过；2：躲草里能打过
+ */
+inline unsigned char Conquerable(THUAI7::Ship & enemy)
+{
+    coordinate me = {ShipInfo::myself.me.x, ShipInfo::myself.me.y};
+    coordinate en = {enemy.x,enemy.y};
+
+    health myhealth = {ShipInfo::myself.me.hp, ShipInfo::myself.me.armor, ShipInfo::myself.me.shield};
+    health enemyhealth = {enemy.hp,enemy.armor,enemy.shield};
+
+    THUAI7::WeaponType myweapon = ShipInfo::myself.me.weaponType;
+    THUAI7::WeaponType enemyweapon = enemy.weaponType;
+
+    if (MapInfo::fullmap[me.x / 1000][me.y / 1000] == MapInfo::Shadow && MapInfo::fullmap[en.x / 1000][en.y / 1000] != MapInfo::Shadow)
+    {
+        enemyhealth -= myweapon;
+        while ((myhealth.hp && enemyhealth.hp))
+        {
+            enemyhealth -= myweapon;
+            if (!enemyhealth.hp)
+            {
+                break;
+            }
+            myhealth -= enemyweapon;
+            if (!myhealth.hp)
+            {
+                break;
+            }
+        }
+        switch (myhealth.hp)
+        {
+            case 0:
+                return 0;
+                break;
+            default:
+                return 1;
+                break;
+        }
+    }
+    else
+    {
+        while ((myhealth.hp && enemyhealth.hp))
+        {
+            enemyhealth -= myweapon;
+            if (!enemyhealth.hp)
+            {
+                break;
+            }
+            myhealth -= enemyweapon;
+            if (!myhealth.hp)
+            {
+                break;
+            }
+        }
+        switch (myhealth.hp)
+        {
+            case 0:
+                enemyhealth -= myweapon;
+                if (!enemyhealth.hp)
+                {
+                    return 2;
+                }
+                else
+                {
+                    return 0;
+                }
+                break;
+            default:
+                return 1;
+                break;
+        }
+    }
+
+
+
+
+}
+
+
 void AI::play(IShipAPI& api)
 {
     ShipInfo::CheckInfo(api);
@@ -1697,7 +1882,7 @@ void AI::play(IShipAPI& api)
 //    }
     for (auto const& i : ShipInfo::Enemies)
     {
-        if (i->shipState == THUAI7::ShipState::Attacking)
+        if (i->shipState == THUAI7::ShipState::Attacking && In_ShootingDistance(i->x,i->y,WeaponToDis(i->weaponType)))
         {
             api.EndAllAction();
             double angle = i->facingDirection;
