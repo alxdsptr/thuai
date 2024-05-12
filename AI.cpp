@@ -33,6 +33,8 @@ extern const bool asynchronous = false;
 #define MODEPARAM_ConstructFort (2)
 #define MODEPARAM_ConstructCommunity (3)
 
+#define MODEPARAM_AttackHome (1)
+
 
 
 
@@ -852,7 +854,7 @@ namespace HomeAction
          coordinate& target;
          unsigned char ModeParam;
      public:
-         SetShipMode(unsigned char ShipID, ShipMode mode, unsigned char ModeParam = MODEPARAM_ConstructFactory, coordinate& target = tmp_coordinate) :
+         SetShipMode(unsigned char ShipID, ShipMode mode, unsigned char ModeParam = 0, coordinate& target = tmp_coordinate) :
              shipID(ShipID),
              mode(mode),
              target(target),
@@ -930,7 +932,7 @@ namespace HomeInfo
                     index_to_id[ship_cnt] = id;
                     ship_cnt++;
                 }
-                temp[id] == true;
+                temp[id] = true;
             }
             for (int i = 1; i <= 4; i++)
             {
@@ -1057,6 +1059,7 @@ namespace Commute
             std::string message;
             message.resize(BUFFER_SIZE + 1);
             memcpy(message.data(), &HomeInfo::TeamShipBuffer[index], BUFFER_SIZE);
+            std::cout << index+1 << "  " << HomeInfo::TeamShipBuffer[index].Mode << std::endl;
             //message[BUFFER_SIZE] = '\0';
             api.SendBinaryMessage(index, message);
         }
@@ -2013,7 +2016,17 @@ void AI::play(IShipAPI& api)
 
                     break;
                 case ATTACK:
-
+                    nextMode = ShipInfo::myself.mode = ATTACK;
+                    switch (ShipInfo::ShipBuffer.ModeParam)
+                    {
+                        case MODEPARAM_AttackHome:
+                            ShipInfo::myself.TargetPos = *(MapInfo::PositionLists[MapInfo::EnemyHome].begin());
+                            break;
+                        default:
+                            ShipInfo::myself.TargetPos = ShipInfo::ShipBuffer.target;
+                            break;
+                    }
+                    
                     break;
                 default:
                     break;
@@ -2089,7 +2102,7 @@ void AI::play(IShipAPI& api)
             }*/
         }
     }
-
+    std::cout << ShipInfo::myself.mode << std::endl;
     callStack.top()(api);
 
     Commute::report(api);
@@ -2194,8 +2207,8 @@ BT::SequenceNode<ITeamAPI> root = {
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipNumThreshold(2)}),
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, PRODUCE)}),
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(3)})
-    //new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, ATTACK,1,(coordinate &)(*(MapInfo::PositionLists[MapInfo::EnemyHome].begin())))}) 
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(3)}),
+    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, ATTACK,MODEPARAM_AttackHome)}) 
     /*
     new BT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)}),
     new BT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)})*/
