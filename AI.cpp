@@ -451,7 +451,6 @@ double WeaponToDis(THUAI7::WeaponType p)
 
 
 
-
 namespace BT
 {
 
@@ -707,6 +706,12 @@ namespace Conditions
     {
         return [=](IShipAPI& api) {
             return ShipInfo::myself.me.shipState == state;
+        };
+    }
+    auto PreAttack()
+    {
+        return [=](IShipAPI& api) {
+            return ShipInfo::myself.me.shipState == THUAI7::ShipState::Idle;
         };
     }
 }  
@@ -1838,6 +1843,43 @@ inline unsigned char Conquerable(THUAI7::Ship & enemy)
 }
 
 
+std::stack<unsigned char> interrupt_codeRecorder;
+
+
+/**
+ * @brief 对应的Interruptcode:1
+ */
+auto detectEnemy=[](IShipAPI& api)
+{ 
+        std::cout << "Detected Enemies!!!\n";
+       
+    if (!ShipInfo::Enemies.size())
+    {
+            callStack.pop();
+        interrupt_codeRecorder.pop();
+        return;
+    }
+    for (auto const& i : ShipInfo::Enemies)
+    {
+        if (i->shipState == THUAI7::ShipState::Attacking && In_ShootingDistance(i->x, i->y, WeaponToDis(i->weaponType)))
+        {
+            api.EndAllAction();
+            double angle = i->facingDirection;
+            double move_angle = angle + PI / 2;
+            auto dodgeNode = new BT::SequenceNode<IShipAPI>{
+                new BT::eventNode<IShipAPI>{Conditions::always_ship, ShipAction::MoveFunc(move_angle, 200)},
+                new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), ShipAction::AttackFunc(i->x, i->y)},
+            };
+
+            callStack.push(WrapperFunc([dodgeNode](IShipAPI& api)
+                                        { return dodgeNode->perform(api); }));
+            break;
+        }
+    } 
+};
+
+
+
 void AI::play(IShipAPI& api)
 {
     ShipInfo::CheckInfo(api);
@@ -1847,72 +1889,47 @@ void AI::play(IShipAPI& api)
         callStack.push(&ShipStep);
         Ship_Init = 0;
     }
-    if (Commute::RefreshInfo(api))
+    //if (Commute::RefreshInfo(api))
+    //{
+    //    std::cout << "Success\n"
+    //              << ((ShipInfo::ShipBuffer.Mode == PRODUCE) ? "PRODUCE\n" : "NO!!!\n");
+    //    
+    //    if (ShipInfo::myself.mode!=ShipInfo::ShipBuffer.Mode)
+    //    {
+    //        nextMode = ShipInfo::myself.mode = ShipInfo::ShipBuffer.Mode;
+    //        clear(api);
+    //        /* switch (ShipInfo::ShipBuffer.Mode)
+    //        {
+    //            default:
+    //                break;
+    //        }*/
+    //    }
+    //}
+
+
+
+    if (!interrupt_codeRecorder.size())
     {
-        std::cout << "Success\n"
-                  << ((ShipInfo::ShipBuffer.Mode == PRODUCE) ? "PRODUCE\n" : "NO!!!\n");
-        
-        if (ShipInfo::myself.mode!=ShipInfo::ShipBuffer.Mode)
+        for (auto const& i : ShipInfo::Enemies)
         {
-            nextMode = ShipInfo::myself.mode = ShipInfo::ShipBuffer.Mode;
-            clear(api);
-            /* switch (ShipInfo::ShipBuffer.Mode)
+            if (manhatten_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y,i->x,i->y)<=8000 && abs(atan2(ShipInfo::myself.me.y - i->y, ShipInfo::myself.me.x - i->x) - i->facingDirection) <= PI / 36)
             {
-                default:
-                    break;
+                interrupt_codeRecorder.push(1);
+                callStack.push(detectEnemy);
+                break;
+            }
+            // 只是测试用
+            /*
+            else if (MapInfo::MySide == BLUE)
+            {
+                int ex = i->x, ey = i->y;
+                int mx = ShipInfo::myself.me.x, my = ShipInfo::myself.me.y;
+                double angle = atan2(ey - my, ex - mx);
+                api.Attack(angle);
             }*/
         }
     }
-    /*
-    if (Ship_Init)
-    {
-        nextMode = IDLE;
-    }*/
-//    if (ShipInfo::nearBullet)
-//    {
-//        for (auto const& bullet : ShipInfo::Bullets)
-//        {
-//            double direct = bullet->facingDirection;
-//            double distance = euclidean_distance(bullet->x, bullet->y, ShipInfo::myself.me.x, ShipInfo::myself.me.y);
-//            double time = distance / bullet->speed;
-//            api.EndAllAction();
-//            api.Move(time + 10, direct + PI / 2);
-//            return;
-//        }
-//    }
-    for (auto const& i : ShipInfo::Enemies)
-    {
-        if (i->shipState == THUAI7::ShipState::Attacking && In_ShootingDistance(i->x,i->y,WeaponToDis(i->weaponType)))
-        {
-            api.EndAllAction();
-            double angle = i->facingDirection;
-            double move_angle = angle + PI / 2;
-            //BT::SequenceNode<IShipAPI> dodgeNode{
-            auto dodgeNode = new BT::SequenceNode<IShipAPI>{
-                new BT::eventNode<IShipAPI>{Conditions::always_ship, ShipAction::MoveFunc(move_angle, 200)},
-                new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), ShipAction::AttackFunc(i->x, i->y)},
-            };
-            /*
-            int ex = i->x, ey = i->y;
-            int mx = ShipInfo::myself.me.x, my = ShipInfo::myself.me.y;
-            double dis = euclidean_distance(ex, ey, mx, my);
-            */
-            //ShipAction::DodgeAndAttack.events[0].set(angle + PI / 2, 300);
-            //ShipAction::DodgeAndAttack.events[1].set(i->x, i->y);
-            callStack.push(WrapperFunc([dodgeNode](IShipAPI& api)
-                                     { return dodgeNode->perform(api); }));
-            break;
-        }
-        //只是测试用
-        /*
-        else if (MapInfo::MySide == BLUE)
-        {
-            int ex = i->x, ey = i->y;
-            int mx = ShipInfo::myself.me.x, my = ShipInfo::myself.me.y;
-            double angle = atan2(ey - my, ex - mx);
-            api.Attack(angle);
-        }*/
-    }
+
     callStack.top()(api);
     //ShipStep(api);
     /*
@@ -2011,12 +2028,13 @@ BT::SequenceNode<ITeamAPI> root = {
     new BT::TryUntilSuccessNode(new BT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)})),
     new BT::TryUntilSuccessNode(new BT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)}))
          */
-    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_1,PRODUCE)}),
+    //new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_1,PRODUCE)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipNumThreshold(2)}),
-    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, CONSTRUCT)}),
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(3)}),
-    new BT::eventNode<ITeamAPI>(Conditions::always, HomeAction::SetShipMode(SHIP_3, ATTACK)) /*
+    //new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, CONSTRUCT)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(3)})
+    //new BT::eventNode<ITeamAPI>(Conditions::always, HomeAction::SetShipMode(SHIP_3, ATTACK)) 
+    /*
     new BT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)}),
     new BT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)})*/
 };
