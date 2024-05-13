@@ -439,31 +439,10 @@ double euclidean_distance(double x1, double y1, double x2, double y2)
 {
 	return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2));
 };
+double WeaponDis[6] = {0, 4000, 4000, 4000, 8000, 8000};
 double WeaponToDis(THUAI7::WeaponType p)
 {
-    switch (p)
-    {
-        case THUAI7::WeaponType::NullWeaponType:
-            return 0;
-            break;
-        case THUAI7::WeaponType::LaserGun:
-            return 4000;
-            break;
-        case THUAI7::WeaponType::PlasmaGun:
-            return 4000;
-            break;
-        case THUAI7::WeaponType::ShellGun:
-            return 4000;
-            break;
-        case THUAI7::WeaponType::MissileGun:
-            return 8000;
-            break;
-        case THUAI7::WeaponType::ArcGun:
-            return 8000;
-            break;
-        default:
-            break;
-    }
+    return WeaponDis[(int)p];
 }
 
 
@@ -1158,7 +1137,9 @@ namespace RoadSearchMode
     */
     std::function<bool(IShipAPI& api)> end_condition = [](IShipAPI& api)
     {
-        if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= WeaponToDis(ShipInfo::myself.me.weaponType) + 200 && api.HaveView(ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y))
+        if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) 
+                <= WeaponToDis(ShipInfo::myself.me.weaponType) + 200 
+            and api.HaveView(ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y))
         {
             return true;
         }
@@ -1872,7 +1853,13 @@ inline int WeaponToDamage(THUAI7::WeaponType weapon, unsigned char towhich)
     return damage * mag;
 }
 
-
+double WeaponHarm[6][3] = {
+    {1200, 1.5, 0.6},
+    {1300, 2, 0.4},
+    {1800, 0.4, 1.5},
+    {1600, 1, 1000},
+    {1800, 2, 2}
+};
 struct health
 {
     int hp;
@@ -1881,6 +1868,7 @@ struct health
 
     void operator-=(THUAI7::WeaponType a)
     {
+        /*
         if (a == THUAI7::WeaponType::MissileGun)
         {
             if (armor>0)
@@ -1911,8 +1899,23 @@ struct health
                 int dam = WeaponToDamage(a, 0);
                 hp = (dam > hp) ? 0 : (hp - dam);
             }
+        }*/
+        int index = (int)a;
+        double damage = WeaponHarm[index][0];
+        double damage_to_shield = damage * WeaponHarm[index][2];
+        if (shield > 0 and a != THUAI7::WeaponType::MissileGun)
+        {
+			shield = (damage_to_shield > shield) ? 0 : (shield - damage_to_shield);
+		}
+        else if (armor > 0)
+        {
+            double damage_to_armor = damage * WeaponHarm[index][1];
+			armor = (damage_to_armor > armor) ? 0 : (armor - damage_to_armor);
+		}
+        else if (hp > 0)
+        {
+			hp = (damage > hp) ? 0 : (hp - damage);
         }
-        
     }
 };
 
