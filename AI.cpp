@@ -166,7 +166,7 @@ namespace Commute
 namespace HomeInfo
 {
 
-    int UsableShip[5] = {0};
+    bool UsableShip[5] = {0};
     int MyScore = 0;
     int EnemyScore = 0;
     int MyMoney = 0;
@@ -178,7 +178,8 @@ namespace HomeInfo
     coordinate MyHomePos, EnemyHomePos;
 
     // 为什么不用shared_ptr<const THUAI7::Ship>?
-    std::vector<THUAI7::Ship> MyShips, EnemyShips, EnemyShipsInSight;
+    std::vector<THUAI7::Ship> EnemyShips, EnemyShipsInSight;
+    THUAI7::Ship MyShips[4];
     int index_to_id[4], ship_cnt = 0;
 
     /**
@@ -473,7 +474,7 @@ namespace BT
     class eventNode
     {
     public:
-        NodeState state;
+        NodeState state = IDLE;
         std::function<bool(T& api)> condition;    ///< 执行条件
         std::optional<std::function<bool(T& api)>> judgeSuccess;  ///< 补充用来判断是否成功的函数
         std::function<NodeState(T& api)> action;  ///< 待执行的函数
@@ -617,6 +618,15 @@ namespace BT
             curChild(0)
         {
         }
+        void operator=(std::initializer_list<eventNode<T>*> l)
+        {
+            events = l;
+            curChild = 0;
+        }
+        SequenceNode() :
+            curChild(0)
+        {
+		}
 
         SequenceNode(const SequenceNode& a) :
             curChild(0)
@@ -687,10 +697,18 @@ namespace Conditions
         return [threshold](ITeamAPI& api)
         { return (api.GetEnergy() >= threshold); };
     }
+    /*
     auto ShipNumThreshold(int threshold)
     {
 		return [threshold](ITeamAPI& api)
         { return (HomeInfo::MyShips.size() >= threshold); };
+	}*/
+    auto ShipAvailable(int shipID)
+    {
+        return [=](ITeamAPI& api)
+            {
+			return HomeInfo::UsableShip[shipID];
+		};
 	}
     auto ShipHasProducer(int shipID, THUAI7::ProducerType type)
     {
@@ -909,7 +927,7 @@ namespace revenge
 
 namespace HomeInfo
 {
-    //int first_id;
+    int first_id;
     void CheckInfo(ITeamAPI& api)
     {
         //初始化地图并确定我方颜色
@@ -927,13 +945,16 @@ namespace HomeInfo
         //刷新我方舰船及我方、对方基地坐标
         {
             auto sps = api.GetShips();
-            MyShips.clear();
             //memset(UsableShip, 0, 4 * sizeof(int));
             bool temp[5] = {0};
             for (size_t i = 0; i < sps.size(); i++)
             {
-                MyShips.push_back(*sps[i]);
                 int id = sps[i]->playerID;
+                if (init)
+                {
+                    first_id = id; 
+                }
+                MyShips[id - 1] = *sps[i];
                 if (UsableShip[id] == false)
                 {
                     index_to_id[ship_cnt] = id;
@@ -952,7 +973,6 @@ namespace HomeInfo
             }
             if (init)
             {
-                //first_id = MyShips[0].playerID;
                 coordinate tmp(MyShips[0].x / 1000, MyShips[0].y/1000);
                 /*
                 for (size_t i = 0; i < 2; i++)
@@ -963,8 +983,6 @@ namespace HomeInfo
                         EnemyHomePos = MapInfo::PositionLists[MapInfo::Home][1 - i];
                         break;
                     }
-
-
                 }*/
             }
         }
@@ -1063,6 +1081,10 @@ namespace Commute
         for (auto const& ship : HomeInfo::MyShips)
         {
             int index = ship.playerID;
+            if (!HomeInfo::UsableShip[index])
+            {
+				continue;
+			}
             std::string message;
             message.resize(BUFFER_SIZE + 1);
             memcpy(message.data(), &HomeInfo::TeamShipBuffer[index], BUFFER_SIZE);
@@ -2275,69 +2297,12 @@ bool BuildSecondCivil = false;
 
 volatile int Ind = 2;
 
-BT::SequenceNode<ITeamAPI> root = {
-        /*
-    new BT::AlwaysSuccessNode(new BT::eventNode({Conditions::always, HomeAction::SetShipMode(1,PRODUCE)})),
-    new BT::TryUntilSuccessNode(new BT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3)})),
-    new BT::AlwaysSuccessNode(new BT::eventNode({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip)})),
-    new BT::TryUntilSuccessNode(new BT::eventNode({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip)})),
-    new BT::AlwaysSuccessNode(new BT::eventNode({Conditions::always, HomeAction::SetShipMode(SHIP_1|SHIP_2, PRODUCE)}))
-    new BT::TryUntilSuccessNode(new BT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)})),
-    new BT::TryUntilSuccessNode(new BT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)}))
-         */
-    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_1,PRODUCE)}),
-
-
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
-
-
-
-
-
-
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(2)}),
-    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, ATTACK, MODEPARAM_AttackHome)}), 
-
-
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipNumThreshold(3)}),
-    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, CONSTRUCT, MODEPARAM_ConstructFactory)}),
-
-
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleConstructor3), Conditions::ShipHasConstructor(2, THUAI7::ConstructorType::Constructor3)}),
-
-
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipNumThreshold(4)}),
-
-    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_4, ATTACK, MODEPARAM_AttackHome)}),
-
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(3, THUAI7::ModuleType::ModuleArmor3), Conditions::ShipHasArmor(3, THUAI7::ArmorType::Armor3)}),
-
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(3, THUAI7::ModuleType::ModuleShield3), Conditions::ShipHasShield(3, THUAI7::ShieldType::Shield3)}),
-
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun), Conditions::ShipHasWeapon(1, THUAI7::WeaponType::LaserGun)}),
-
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleLaserGun), Conditions::ShipHasWeapon(2, THUAI7::WeaponType::LaserGun)}),
-
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleArmor3), Conditions::ShipHasArmor(1, THUAI7::ArmorType::Armor3)}),
-
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleShield3), Conditions::ShipHasShield(1, THUAI7::ShieldType::Shield3)}),
-
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleArmor3), Conditions::ShipHasArmor(2, THUAI7::ArmorType::Armor3)}),
-
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleShield3), Conditions::ShipHasShield(2, THUAI7::ShieldType::Shield3)}),
-
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(4, THUAI7::ModuleType::ModuleArmor3), Conditions::ShipHasArmor(4, THUAI7::ArmorType::Armor3)}),
-
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(4, THUAI7::ModuleType::ModuleShield3), Conditions::ShipHasShield(4, THUAI7::ShieldType::Shield3)})
-
-    /*
-    new BT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)}),
-    new BT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)})*/
-};
 
 
 bool run = true;
 
+bool init_root = false;
+BT::SequenceNode<ITeamAPI> root;
 
 void AI::play(ITeamAPI& api)  // 默认team playerID 为0
 {
@@ -2427,9 +2392,40 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     {
         root.events[0] = new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(1 << (HomeInfo::first_id - 1),PRODUCE)});
     }*/
+    if (!init_root)
+    {
+        init_root = true;
+        root = {
+    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_1,PRODUCE)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(HomeInfo::first_id, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipAvailable(3)}),
+    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, ATTACK, MODEPARAM_AttackHome)}), 
+
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipAvailable(3 - HomeInfo::first_id)}),
+    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, CONSTRUCT, MODEPARAM_ConstructFactory)}),
+
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(3 - HomeInfo::first_id, THUAI7::ModuleType::ModuleConstructor3), Conditions::ShipHasConstructor(2, THUAI7::ConstructorType::Constructor3)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipAvailable(4)}),
+    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_4, ATTACK, MODEPARAM_AttackHome)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(3, THUAI7::ModuleType::ModuleArmor3), Conditions::ShipHasArmor(3, THUAI7::ArmorType::Armor3)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(3, THUAI7::ModuleType::ModuleShield3), Conditions::ShipHasShield(3, THUAI7::ShieldType::Shield3)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(HomeInfo::first_id, THUAI7::ModuleType::ModuleLaserGun), Conditions::ShipHasWeapon(1, THUAI7::WeaponType::LaserGun)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(3 - HomeInfo::first_id, THUAI7::ModuleType::ModuleLaserGun), Conditions::ShipHasWeapon(2, THUAI7::WeaponType::LaserGun)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(HomeInfo::first_id, THUAI7::ModuleType::ModuleArmor3), Conditions::ShipHasArmor(1, THUAI7::ArmorType::Armor3)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(HomeInfo::first_id, THUAI7::ModuleType::ModuleShield3), Conditions::ShipHasShield(1, THUAI7::ShieldType::Shield3)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(3 - HomeInfo::first_id, THUAI7::ModuleType::ModuleArmor3), Conditions::ShipHasArmor(2, THUAI7::ArmorType::Armor3)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(3 - HomeInfo::first_id, THUAI7::ModuleType::ModuleShield3), Conditions::ShipHasShield(2, THUAI7::ShieldType::Shield3)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(4, THUAI7::ModuleType::ModuleArmor3), Conditions::ShipHasArmor(4, THUAI7::ArmorType::Armor3)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(4, THUAI7::ModuleType::ModuleShield3), Conditions::ShipHasShield(4, THUAI7::ShieldType::Shield3)})
+
+};
+    }
     root.perform(api);
     Commute::sync_ships(api);
     //std::this_thread::sleep_for(std::chrono::milliseconds(15));
+    /*
+    new BT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)}),
+    new BT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)})*/
 
 }
 
