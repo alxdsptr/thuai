@@ -1225,6 +1225,10 @@ namespace RoadSearchMode
                         continue;
                     if (nx == x2 and ny == y2)
                     {
+                        if (i != 0 and j != 0)
+                        {
+                            continue;
+                        }
                         double cost = sqrt(i * i + j * j);
                         pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, 0});
                     }
@@ -1509,6 +1513,13 @@ namespace ConstructMode
                 };
             }
         }
+        if (ShipInfo::myself.me.shipState == THUAI7::ShipState::Constructing)
+        {
+            return {
+                CONSTRUCT,
+                false
+            };
+        }
 
         if (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target.x, target.y) <= 1)
         {
@@ -1522,13 +1533,6 @@ namespace ConstructMode
                 }
                 return
                 {
-                    CONSTRUCT,
-                    false
-                };
-            }
-            else if (ShipInfo::myself.me.shipState == THUAI7::ShipState::Constructing)
-            {
-                return {
                     CONSTRUCT,
                     false
                 };
