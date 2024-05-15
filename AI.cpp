@@ -928,6 +928,7 @@ namespace revenge
 namespace HomeInfo
 {
     int first_id;
+    std::vector<int> reviveList;
     void CheckInfo(ITeamAPI& api)
     {
         //初始化地图并确定我方颜色
@@ -966,8 +967,7 @@ namespace HomeInfo
             {
                 if (UsableShip[i] and !temp[i])
                 {
-                    //TODO
-                    //设置复活
+                    reviveList.push_back(i);
                 }
                 UsableShip[i] = temp[i];
             }
@@ -1364,16 +1364,16 @@ namespace RoadSearchMode
         {
             //bool direct_move = true;
             std::vector<std::pair<coordinate, MapInfo::Place>> temp;
-            THUAI7::Ship& me = ShipInfo::myself.me;
-            for (auto const& ship : ShipInfo::FriendShips)
+            auto saveAndChange = [&temp](int x, int y)
             {
+                temp.push_back({{x, y}, MapInfo::fullmap[x][y]});
+                MapInfo::fullmap[x][y] = MapInfo::Place::Ruin;
+            };
+            auto ProcessNearbyShip = [&saveAndChange](std::shared_ptr<const THUAI7::Ship> ship)
+            {
+                THUAI7::Ship& me = ShipInfo::myself.me;
                 int x = ship->x / 1000, y = ship->y / 1000, lx = ship->x % 1000, ly = ship->y % 1000;
                 int mx = ShipInfo::myself.me.x / 1000, my = ShipInfo::myself.me.y / 1000;
-                auto saveAndChange = [&temp](int x, int y)
-                {
-                    temp.push_back({{x, y}, MapInfo::fullmap[x][y]});
-                    MapInfo::fullmap[x][y] = MapInfo::Place::Ruin;
-                };
                 if (euclidean_distance(ship->x, ship->y, me.x, me.y) < 2000)
                 {
                     saveAndChange(x, y);
@@ -1394,7 +1394,15 @@ namespace RoadSearchMode
                         saveAndChange(x, y + 1);
                     }
                 }
+            };
+            for (auto const& ship : ShipInfo::FriendShips)
+            {
+                ProcessNearbyShip(ship);
             }
+            for (auto const& ship : ShipInfo::Enemies)
+            {
+				ProcessNearbyShip(ship);
+			}
             /*
             for (size_t i = 0; i < ShipInfo::FriendShips.size(); i++)
             {
@@ -1874,9 +1882,20 @@ enum additionalMode
     DodgeBullets
 };
 
+struct callFunc
+{
+    std::function<void(IShipAPI&)> func;
+    int id, priority;
+    bool operator<(const callFunc& a) const
+    {
+		return priority < a.priority;
+	}
+};
 
 std::stack<std::function<void(IShipAPI&)>> callStack;
 //{&ShipStep};
+//std::priority_queue<callFunc> callStack;
+
 
 auto WrapperFunc(std::function<BT::NodeState(IShipAPI& api)> func)
 {
@@ -2470,6 +2489,26 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     {
         root.events[0] = new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(1 << (HomeInfo::first_id - 1),PRODUCE)});
     }*/
+    if (!HomeInfo::reviveList.empty())
+    {
+        for (auto iter = HomeInfo::reviveList.begin(); iter != HomeInfo::reviveList.end(); iter++)
+        {
+            int i = *iter;
+            std::future<bool> res;
+            if (i <= 2)
+            {
+                res = api.BuildShip(THUAI7::ShipType::CivilianShip, 0);
+            }
+            else
+            {
+                res = api.BuildShip(THUAI7::ShipType::MilitaryShip, 0);
+            }
+            if (res.get())
+            {
+                HomeInfo::reviveList.erase(iter);
+            }
+        }
+    }
     if (!init_root)
     {
         init_root = true;
