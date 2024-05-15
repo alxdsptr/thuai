@@ -284,7 +284,7 @@ namespace MapInfo
         if (type == THUAI7::PlaceType::Wormhole)
             return 2;
     }
-
+    int resource_cnt;
     template<class T>
     void LoadFullMap(T& api)
     {
@@ -301,6 +301,7 @@ namespace MapInfo
                 PositionLists[fullmap[i][j]].insert(coordinate(i, j));
             }
         }
+        resource_cnt = PositionLists[Resource].size();
     }
 
 }  // namespace MapInfo
@@ -1111,7 +1112,7 @@ namespace Commute
         memcpy(message.data(), &ShipInfo::ReportBuffer, REPORTBUFFER_SIZE);
         api.SendBinaryMessage(0, message);
     }
-    std::vector<ReportBuffer> reports;
+    std::deque<ReportBuffer> reports;
     void receive_message(ITeamAPI& api)
     {
         while (api.HaveMessage())
@@ -2242,6 +2243,10 @@ void AI::play(IShipAPI& api)
 
             break;
         }
+        else if (i->weaponType == THUAI7::WeaponType::NullWeaponType)
+        {
+            api.Attack(atan2(i->y - ShipInfo::myself.me.y, i->x - ShipInfo::myself.me.x));
+        }
 
     }
 
@@ -2372,14 +2377,19 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
         {
             HomeInfo::TeamShipBuffer[i].with_param = true;
         }
-        Commute::ReportBuffer tmp = *Commute::reports.begin();
-        Commute::reports.erase(Commute::reports.begin());
+        Commute::ReportBuffer tmp = Commute::reports.front();
+        Commute::reports.pop_front();
         switch (tmp.instruction)
         {
             case Instruction_RefreshResource:
                 switch (tmp.param)
                 {
                     case Parameter_ResourceRunningOut:
+                        MapInfo::resource_cnt--;
+                        if (MapInfo::resource_cnt == 0)
+                        {
+                            HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[0]].Mode = CONSTRUCT;
+                        }
                         for (size_t i = 0; i < 4; i++)
                         {
                             HomeInfo::TeamShipBuffer[i].with_param = 1;
