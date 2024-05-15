@@ -48,6 +48,10 @@ extern const bool asynchronous = false;
 #define Parameter_DestroyedEnemyCunstruction (1<<2)
 #define Parameter_DestroyedFriendConstruction (1<<3)
 
+#define ShipStepID 0
+#define DodgeID 1
+#define RoadSearchID 2
+#define RATIO 1000
 
 // 选手需要依次将player1到player4的船类型在这里定义
 extern const std::array<THUAI7::ShipType, 4> ShipTypeDict = {
@@ -117,7 +121,6 @@ enum ShipMode
     ROB,
     RUIN,
     FOLLOW,
-    ROADSEARCH
 };
 
 /**
@@ -440,6 +443,10 @@ double euclidean_distance(double x1, double y1, double x2, double y2)
 {
 	return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2));
 };
+double euclidean_distance(coordinate x, coordinate y)
+{
+    return sqrt((x.x - y.x) * (x.x - y.x) + (x.y - y.y) * (x.y - y.y));
+}
 double WeaponDis[6] = {0, 4000, 4000, 4000, 8000, 8000};
 double WeaponToDis(THUAI7::WeaponType p)
 {
@@ -1147,29 +1154,24 @@ namespace AttackMode
 
 }
 
-namespace RoadSearchMode
+bool is_empty(int x, int y)
 {
-    std::stack<coordinate> target;
-
-
+    MapInfo::Place t = MapInfo::fullmap[x][y];
+    return (t == MapInfo::Space or t == MapInfo::Shadow or t == MapInfo::OpenWormhole);
+};
+class RoadSearch
+{
+public:
+    coordinate target, last_location = {-1, -1};
     std::deque<coordinate> path;
     bool visited[maxLen][maxLen];
     coordinate from[maxLen][maxLen];
-
-
-    /**
-    * @brief 寻路终止条件
-    */
     std::function<bool(IShipAPI& api)> end_condition;
-
-
-    auto is_empty = [](int x,int y)
+    RoadSearch(coordinate target, std::function<bool(IShipAPI& api)> end_condition) :
+        target(target),
+        end_condition(end_condition)
     {
-        MapInfo::Place t = MapInfo::fullmap[x][y];
-        return (t == MapInfo::Space or t == MapInfo::Shadow or t == MapInfo::OpenWormhole);
-        //THUAI7::PlaceType t = MapInfo::map[x][y];
-        //return (t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole);
-    };
+	}
     std::deque<coordinate> search_road(int x1, int y1, int x2, int y2)
     {
         std::priority_queue<node> pq;
@@ -1200,25 +1202,15 @@ namespace RoadSearchMode
             {
                 for (int j = -1; j <= 1; j++)
                 {
-                    //if (i == 0 and j == 0)
-                    //    continue;
-                    //if (i == -1 and j == -1 and (!is_empty(MapInfo::fullmap[now.x - 1][now.y]) or !is_empty(MapInfo::fullmap[now.x][now.y - 1])))
-                    //    continue;
-                    //if (i == 1 and j == -1 and (!is_empty(MapInfo::fullmap[now.x + 1][now.y]) or !is_empty(MapInfo::fullmap[now.x][now.y - 1])))
-                    //    continue;
-                    //if (i == -1 and j == 1 and (!is_empty(MapInfo::fullmap[now.x - 1][now.y]) or !is_empty(MapInfo::fullmap[now.x][now.y + 1])))
-                    //    continue;
-                    //if (i == 1 and j == 1 and (!is_empty(MapInfo::fullmap[now.x + 1][now.y]) or !is_empty(MapInfo::fullmap[now.x][now.y + 1])))
-                    //    continue;
                     if (i == 0 and j == 0)
                         continue;
-                    if (i == -1 and j == -1 and (!is_empty(now.x - 1,now.y) or !is_empty(now.x,now.y - 1)))
+                    if (i == -1 and j == -1 and (!is_empty(now.x - 1, now.y) or !is_empty(now.x, now.y - 1)))
                         continue;
-                    if (i == 1 and j == -1 and (!is_empty(now.x + 1,now.y) or !is_empty(now.x,now.y - 1)))
+                    if (i == 1 and j == -1 and (!is_empty(now.x + 1, now.y) or !is_empty(now.x, now.y - 1)))
                         continue;
-                    if (i == -1 and j == 1 and (!is_empty(now.x - 1,now.y) or !is_empty(now.x,now.y + 1)))
+                    if (i == -1 and j == 1 and (!is_empty(now.x - 1, now.y) or !is_empty(now.x, now.y + 1)))
                         continue;
-                    if (i == 1 and j == 1 and (!is_empty(now.x + 1,now.y) or !is_empty(now.x,now.y + 1)))
+                    if (i == 1 and j == 1 and (!is_empty(now.x + 1, now.y) or !is_empty(now.x, now.y + 1)))
                         continue;
                     int nx = now.x + i, ny = now.y + j;
                     if (nx < 0 or nx >= 50 or ny < 0 or ny >= 50 or visited[nx][ny])
@@ -1232,7 +1224,7 @@ namespace RoadSearchMode
                         double cost = sqrt(i * i + j * j);
                         pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, 0});
                     }
-                    //if ((t != MapInfo::Space and t != MapInfo::Shadow and t != MapInfo::OpenWormhole) || (coordinate(nx, ny) == *MapInfo::NoStep.find(coordinate(nx, ny))))
+                    // if ((t != MapInfo::Space and t != MapInfo::Shadow and t != MapInfo::OpenWormhole) || (coordinate(nx, ny) == *MapInfo::NoStep.find(coordinate(nx, ny))))
                     if (!is_empty(nx, ny))
                         continue;
                     double cost = sqrt(i * i + j * j);
@@ -1242,10 +1234,104 @@ namespace RoadSearchMode
             }
         }
     }
+    bool operator()(IShipAPI &api)
+    {
+        if (path.empty())
+        {
+            if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target) <= 1)
+            {
+                return true;
+            }
+            path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target.x, target.y);
+        }
+        if (end_condition(api))
+        {
+            return true;
+        }
+        if (api.GetSelfInfo()->shipState == THUAI7::ShipState::Idle and !path.empty())
+        {
+            std::vector<std::pair<coordinate, MapInfo::Place>> temp;
+            auto saveAndChange = [&temp](int x, int y)
+            {
+                temp.push_back({{x, y}, MapInfo::fullmap[x][y]});
+                MapInfo::fullmap[x][y] = MapInfo::Place::Ruin;
+            };
+            auto ProcessNearbyShip = [&saveAndChange](std::shared_ptr<const THUAI7::Ship> ship)
+            {
+                THUAI7::Ship& me = ShipInfo::myself.me;
+                int x = ship->x / 1000, y = ship->y / 1000, lx = ship->x % 1000, ly = ship->y % 1000;
+                int mx = ShipInfo::myself.me.x / 1000, my = ShipInfo::myself.me.y / 1000;
+                if (euclidean_distance(ship->x, ship->y, me.x, me.y) < 2000)
+                {
+                    saveAndChange(x, y);
+                    if (lx <= 420)
+                    {
+                        saveAndChange(x - 1, y);
+                    }
+                    else if (lx >= 580)
+                    {
+                        saveAndChange(x + 1, y);
+                    }
+                    if (ly <= 420)
+                    {
+                        saveAndChange(x, y - 1);
+                    }
+                    else if (ly >= 580)
+                    {
+                        saveAndChange(x, y + 1);
+                    }
+                }
+            };
+            for (auto const& ship : ShipInfo::FriendShips)
+            {
+                ProcessNearbyShip(ship);
+            }
+            for (auto const& ship : ShipInfo::Enemies)
+            {
+				ProcessNearbyShip(ship);
+			}
+            if(!temp.empty())
+                path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target.x, target.y);
+            else if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, path.front().x * 1000 + 500, path.front().y * 1000 + 500) > 1500)
+            {
+                path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target.x, target.y);
+            }
+            else if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, last_location.x, last_location.y) < 500)
+            {
+                path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target.x, target.y);
+			}
+            for (const auto & i : temp)
+            {
+                MapInfo::fullmap[i.first.x][i.first.y] = i.second;
+            }
+            auto next = path.front();
+            path.pop_front();
+            int dx = next.x * 1000 + 500 - ShipInfo::myself.me.x;
+            int dy = next.y * 1000 + 500 - ShipInfo::myself.me.y;
+            std::cout << "x: " << ShipInfo::myself.me.x << " y: " << ShipInfo::myself.me.y << "nx: " << next.x << "ny: " << next.y << std::endl;
+            std::cout << "dx: " << dx << " dy: " << dy << std::endl;
+            double time = sqrt(dx * dx + dy * dy) / 3.0;
+            double angle = atan2(dy, dx);
+            std::cout << "time: " << time << " angle: " << angle << std::endl;
+            auto res = api.Move(time, angle);
+            if (!res.get())
+            {
+                std::cout << "move fail"; 
+            }
+        }
+        return false;
+    }
+};
+
+namespace RoadSearchMode
+{
+
+
 
     /**
      * @brief 已经弃用，请勿使用
      */
+    /*
     std::deque<coordinate> search_road(int x1, int y1, THUAI7::PlaceType type, IShipAPI& api)
     {
         int min_dis = 0x7fffffff;
@@ -1335,123 +1421,23 @@ namespace RoadSearchMode
                 }
             }
         }
-    }
-
-    ModeRetval Perform(IShipAPI& api)
-    {
-        if (path.empty())
-        {
-            if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target.top()) <= 1)
-            {
-                target.pop();
-                return {
-                    IDLE,
-                    true
-                };
-            }
-            path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target.top().x, target.top().y);
-        }
-        if (end_condition(api))
-        {
-            path.clear();
-            target.pop();
-            return {
-                IDLE,
-                true
-            };
-        }
-        if (api.GetSelfInfo()->shipState == THUAI7::ShipState::Idle and !path.empty())
-        {
-            //bool direct_move = true;
-            std::vector<std::pair<coordinate, MapInfo::Place>> temp;
-            auto saveAndChange = [&temp](int x, int y)
-            {
-                temp.push_back({{x, y}, MapInfo::fullmap[x][y]});
-                MapInfo::fullmap[x][y] = MapInfo::Place::Ruin;
-            };
-            auto ProcessNearbyShip = [&saveAndChange](std::shared_ptr<const THUAI7::Ship> ship)
-            {
-                THUAI7::Ship& me = ShipInfo::myself.me;
-                int x = ship->x / 1000, y = ship->y / 1000, lx = ship->x % 1000, ly = ship->y % 1000;
-                int mx = ShipInfo::myself.me.x / 1000, my = ShipInfo::myself.me.y / 1000;
-                if (euclidean_distance(ship->x, ship->y, me.x, me.y) < 2000)
-                {
-                    saveAndChange(x, y);
-                    if (lx <= 420)
-                    {
-                        saveAndChange(x - 1, y);
-                    }
-                    else if (lx >= 580)
-                    {
-                        saveAndChange(x + 1, y);
-                    }
-                    if (ly <= 420)
-                    {
-                        saveAndChange(x, y - 1);
-                    }
-                    else if (ly >= 580)
-                    {
-                        saveAndChange(x, y + 1);
-                    }
-                }
-            };
-            for (auto const& ship : ShipInfo::FriendShips)
-            {
-                ProcessNearbyShip(ship);
-            }
-            for (auto const& ship : ShipInfo::Enemies)
-            {
-				ProcessNearbyShip(ship);
-			}
-            /*
-            for (size_t i = 0; i < ShipInfo::FriendShips.size(); i++)
-            {
-                if (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::FriendShips[i]->x / 1000, ShipInfo::FriendShips[i]->y / 1000)<1.5)
-                {
-                    direct_move = false;
-                    coordinate tmp_co(ShipInfo::FriendShips[i]->x / 1000, ShipInfo::FriendShips[i]->y / 1000);
-                    tmplist.insert(tmp_co);
-                    MapInfo::NoStep.insert(tmp_co);
-                }
-            }
-            if (direct_move)
-            {
-                api.Move(time, angle);
-            }
-            else*/
-            if(!temp.empty())
-                path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target.top().x, target.top().y);
-            for (const auto & i : temp)
-            {
-                MapInfo::fullmap[i.first.x][i.first.y] = i.second;
-            }
-            auto next = path.front();
-            path.pop_front();
-            int dx = next.x * 1000 + 500 - ShipInfo::myself.me.x;
-            int dy = next.y * 1000 + 500 - ShipInfo::myself.me.y;
-            std::cout << "x: " << ShipInfo::myself.me.x << " y: " << ShipInfo::myself.me.y << "nx: " << next.x << "ny: " << next.y << std::endl;
-            std::cout << "dx: " << dx << " dy: " << dy << std::endl;
-            double time = sqrt(dx * dx + dy * dy) / 3.0;
-            double angle = atan2(dy, dx);
-            std::cout << "time: " << time << " angle: " << angle << std::endl;
-            auto res = api.Move(time, angle);
-            if (!res.get())
-            {
-                std::cout << "move fail"; 
-            }
-        }
-        return {
-            ROADSEARCH,
-            false
-        };
-    }
-
-    void Clear(IShipAPI& api)
-    {
-        path.clear();
-    }
-
+    }*/
 }
+
+
+struct callFunc
+{
+    std::function<bool(IShipAPI&)> func;
+    int id, priority;
+    bool operator<(const callFunc& a) const
+    {
+		return priority < a.priority;
+	}
+};
+
+//std::stack<std::function<bool(IShipAPI&)>> callStack;
+std::unordered_set<int> interrupt_codeRecorder;
+std::priority_queue<callFunc> callStack;
 namespace ConstructMode
 {
     coordinate target = {-1, -1};
@@ -1490,7 +1476,7 @@ namespace ConstructMode
     auto near_enough = [](IShipAPI& api)
     {
         // return (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1);
-        return (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, RoadSearchMode::target.top().x, RoadSearchMode::target.top().y) <= 1);
+        return (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target.x, target.y) <= 1);
     };
 
     ModeRetval Perform(IShipAPI& api)
@@ -1505,12 +1491,15 @@ namespace ConstructMode
             {
             return (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1);
             };*/
-                RoadSearchMode::target.push(target);
-                RoadSearchMode::end_condition = near_enough;
-
+                auto search = std::make_shared<RoadSearch>(target, near_enough);
+                int priority = 1 * RATIO + callStack.size();
+                callStack.push({
+                    *search,
+                    RoadSearchID, priority
+                });
                 return {
-                    ROADSEARCH,
-                    true
+                    CONSTRUCT,
+                    false
                 };
             }
             else
@@ -1551,6 +1540,7 @@ namespace ConstructMode
                 ShipInfo::ReportBuffer = {Instruction_RefreshConstruction, Parameter_EnemyBuildConstruction, target};
                 Commute::report(api);
                 ShipInfo::myself.TargetPos = {-1, -1};
+                /*
                 if (GetNearestConstruction(api))
                 {
                     RoadSearchMode::end_condition = near_enough;
@@ -1566,7 +1556,11 @@ namespace ConstructMode
                         IDLE,
                         false
                     };
-                }
+                }*/
+                return {
+                    CONSTRUCT,
+                    true
+                };
             }
             else if (Constructed(res.second,ShipInfo::constructType))
             {
@@ -1575,28 +1569,10 @@ namespace ConstructMode
                 ShipInfo::ReportBuffer = {Instruction_RefreshConstruction, Parameter_ConstructionBuildUp, target};
                 Commute::report(api);
                 target = {-1, -1};
-
-                    if (GetNearestConstruction(api))
-                    {
-                            /* [](IShipAPI& api)
-                        {
-                        return (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1);
-                        };*/
-
-                        RoadSearchMode::end_condition = near_enough;
-                        RoadSearchMode::target.push(target);
-                        return {
-                            ROADSEARCH,
-                            true
-                        };
-                    }
-                    else
-                    {
-                        return {
-                            IDLE,
-                            false
-                        };
-                    }
+                return {
+                    CONSTRUCT,
+                    false
+                };
             }
             else
             {
@@ -1612,11 +1588,12 @@ namespace ConstructMode
         {
             if (GetNearestConstruction(api))
             {
-                RoadSearchMode::end_condition = near_enough;
-                RoadSearchMode::target.push(target);
+                auto search = std::make_shared<RoadSearch>(target, near_enough);
+                int priority = 1 * RATIO + callStack.size();
+                callStack.push({*search, RoadSearchID, priority});
                 return {
-                    ROADSEARCH,
-                    true
+                    CONSTRUCT,
+                    false
                 };
             }
             else
@@ -1628,7 +1605,6 @@ namespace ConstructMode
             }
         }
     }
-
     void Clear(IShipAPI& api)
     {
 
@@ -1673,11 +1649,13 @@ namespace ProduceMode
         {
             if (GetNearestResource(api))
             {
-                RoadSearchMode::end_condition = near_enough;
-                RoadSearchMode::target.push(target);
-                return {
-                    ROADSEARCH,
-                    true
+                auto search = std::make_shared<RoadSearch>(target, near_enough);
+                int priority = 1 * RATIO + callStack.size();
+                callStack.push({*search, RoadSearchID, priority});
+                return
+                {
+                    PRODUCE,
+                    false
                 };
             }
             else
@@ -1709,38 +1687,23 @@ namespace ProduceMode
                 ShipInfo::ReportBuffer = {Instruction_RefreshResource, Parameter_ResourceRunningOut, target};
                 Commute::report(api);
                 target = {-1, -1};
-
-                    //if (GetNearestResource(api))
-                    //{
-                    //    RoadSearchMode::end_condition = near_enough;
-                    //    RoadSearchMode::target.push(target);
-                    //    return {
-                    //        ROADSEARCH,
-                    //        true
-                    //    };
-                    //}
-                    //else
-                    //{
-                        return {
-                            PRODUCE,
-                            false
-                        };
-                    //}
-
-
-
+                return {
+                    PRODUCE,
+                    false
+                };
             }
-
         }
         else
         {
             if (GetNearestResource(api))
             {
-                RoadSearchMode::end_condition = near_enough;
-                RoadSearchMode::target.push(target);
-                return {
-                    ROADSEARCH,
-                    true
+                auto search = std::make_shared<RoadSearch>(target, near_enough);
+                int priority = 1 * RATIO + callStack.size();
+                callStack.push({*search, RoadSearchID, priority});
+                return
+                {
+                    PRODUCE,
+                    false
                 };
             }
             else
@@ -1805,7 +1768,8 @@ namespace AttackMode
     {
         if (!target.empty())
         {
-            if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, target.front().x * 1000 + 500, target.front().y * 1000 + 500) <= WeaponToDis(ShipInfo::myself.me.weaponType) + 200)
+            if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, target.front().x * 1000 + 500, target.front().y * 1000 + 500) 
+                <= WeaponToDis(ShipInfo::myself.me.weaponType) + 200)
             {
                 if (getHp(api, target.front()) == 0)
                 {
@@ -1833,23 +1797,19 @@ namespace AttackMode
             }
             else
             {
-                RoadSearchMode::end_condition = [](IShipAPI& api)
+                auto end_condition = [](IShipAPI& api)
                 {
-                    if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, ShipInfo::myself.TargetPos.x * 1000 + 500, ShipInfo::myself.TargetPos.y * 1000 + 500) <= WeaponToDis(ShipInfo::myself.me.weaponType) + 200 && api.HaveView(ShipInfo::myself.TargetPos.x * 1000 + 500, ShipInfo::myself.TargetPos.y * 1000 + 500)) /*api.HaveView(ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y)*/
-                    {
-                        return true;
-                    }
-                    else
-                    {
-                        return false;
-                    }
+                    return (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, ShipInfo::myself.TargetPos.x * 1000 + 500, ShipInfo::myself.TargetPos.y * 1000 + 500) 
+                        <= WeaponToDis(ShipInfo::myself.me.weaponType) + 200 and api.HaveView(ShipInfo::myself.TargetPos.x * 1000 + 500, ShipInfo::myself.TargetPos.y * 1000 + 500));
                 };
+                auto search = std::make_shared<RoadSearch>(target.front(), end_condition);
+                int priority = 1 * RATIO + callStack.size();
+                callStack.push({*search, RoadSearchID, priority});
 
-                RoadSearchMode::target.push(target.front());
-
-                return {
-                    ROADSEARCH,
-                    true
+                return
+                {
+                    ATTACK,
+                    false
                 };
             }
         }
@@ -1865,14 +1825,14 @@ namespace AttackMode
 
 
 //ModeRetval (*perform_list[3])(IShipAPI&) = {&(IdleMode::Perform), &(RoadSearchMode::Perform), &(ProduceMode::Perform)};
-void (*clear_list[3])(IShipAPI&) = {&(IdleMode::Clear), &(RoadSearchMode::Clear), &(ProduceMode::Clear)};
+//void (*clear_list[3])(IShipAPI&) = {&(IdleMode::Clear), &(RoadSearchMode::Clear), &(ProduceMode::Clear)};
 
 
 
 ShipMode nextMode=IDLE;
 
 
-void ShipStep(IShipAPI &api);
+bool ShipStep(IShipAPI &api);
 
 
 enum additionalMode
@@ -1882,21 +1842,8 @@ enum additionalMode
     DodgeBullets
 };
 
-struct callFunc
-{
-    std::function<void(IShipAPI&)> func;
-    int id, priority;
-    bool operator<(const callFunc& a) const
-    {
-		return priority < a.priority;
-	}
-};
 
-std::stack<std::function<void(IShipAPI&)>> callStack;
-//{&ShipStep};
-//std::priority_queue<callFunc> callStack;
-
-
+/*
 auto WrapperFunc(std::function<BT::NodeState(IShipAPI& api)> func)
 {
     return [=](IShipAPI& api)
@@ -1906,15 +1853,16 @@ auto WrapperFunc(std::function<BT::NodeState(IShipAPI& api)> func)
             callStack.pop();
         }
     };
-}
+}*/
 int Ship_Init = 1;
+/*
 void clear(IShipAPI& api)
 {
     for (auto const& clear : clear_list)
     {
        clear(api);
     }
-}
+}*/
 
 /**
  * @brief 检测我方是否在对方射程内
@@ -2120,19 +2068,19 @@ inline unsigned char Conquerable(THUAI7::Ship & enemy)
 }
 
 
-std::stack<unsigned char> interrupt_codeRecorder;
 
 
 /**
  * @brief 对应的Interruptcode:1
  */
+/*
 auto detectEnemy=[](IShipAPI& api)
 { 
         std::cout << "Detected Enemies!!!\n";
        
-    if (!ShipInfo::Enemies.size())
+    if (!ShipInfo::Enemies.empty())
     {
-            callStack.pop();
+        callStack.pop();
         interrupt_codeRecorder.pop();
         return;
     }
@@ -2153,7 +2101,8 @@ auto detectEnemy=[](IShipAPI& api)
             break;
         }
     } 
-};
+};*/
+
 
 
 
@@ -2163,7 +2112,8 @@ void AI::play(IShipAPI& api)
     if (Ship_Init)
     {
         nextMode = IDLE;
-        callStack.push(&ShipStep);
+        callStack.push({&ShipStep, ShipStepID, 0});
+        interrupt_codeRecorder.insert(0);
         Ship_Init = 0;
     }
     if (Commute::RefreshInfo(api))
@@ -2173,7 +2123,7 @@ void AI::play(IShipAPI& api)
         
         if (ShipInfo::myself.mode!=ShipInfo::ShipBuffer.Mode)
         {
-            clear(api);
+            //clear(api);
             switch (ShipInfo::ShipBuffer.Mode)
             {
                 case PRODUCE:
@@ -2271,26 +2221,31 @@ void AI::play(IShipAPI& api)
         }
     }
 
-    //for (auto const& i : ShipInfo::Enemies)
-    //{
-    //    if (i->shipState == THUAI7::ShipState::Attacking)
-    //    {
-    //        api.EndAllAction();
-    //        double angle = i->facingDirection;
-    //        double move_angle = angle + PI / 2;
-    //        // BT::SequenceNode<IShipAPI> dodgeNode{
-    //        auto dodgeNode = new BT::SequenceNode<IShipAPI>{
-    //            new BT::eventNode<IShipAPI>{Conditions::always_ship, ShipAction::MoveFunc(move_angle, 200)},
-    //            new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), ShipAction::AttackFunc(i->x, i->y)},
-    //        };
+    for (auto const& i : ShipInfo::Enemies)
+    {
+        if (i->shipState == THUAI7::ShipState::Attacking)
+        {
+            api.EndAllAction();
+            double angle = i->facingDirection;
+            double move_angle = angle + PI / 2;
+            // BT::SequenceNode<IShipAPI> dodgeNode{
+            auto init_list = {new BT::eventNode<IShipAPI>{Conditions::always_ship, ShipAction::MoveFunc(move_angle, 200)}, 
+                new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), ShipAction::AttackFunc(i->x, i->y)}};
+            auto dodgeNode = std::make_shared<BT::SequenceNode<IShipAPI>>(std::move(init_list));
+            if (interrupt_codeRecorder.find(DodgeID) == interrupt_codeRecorder.end())
+            {
+				interrupt_codeRecorder.insert(DodgeID);
+                int priority = 2 * RATIO + callStack.size();
+				callStack.push({[dodgeNode](IShipAPI& api)
+                { return dodgeNode->perform(api) == BT::SUCCESS; }, DodgeID, priority});
+			}
 
-    //        callStack.push(WrapperFunc([dodgeNode](IShipAPI& api)
-    //                                   { return dodgeNode->perform(api); }));
-    //        break;
-    //    }
+            break;
+        }
 
-    //}
+    }
 
+    /*
     if (!interrupt_codeRecorder.size())
     {
         for (auto const& i : ShipInfo::Enemies)
@@ -2302,9 +2257,14 @@ void AI::play(IShipAPI& api)
                 break;
             }
         }
-    }
+    }*/
     std::cout << ShipInfo::myself.mode << "  "<<nextMode << std::endl;
-    callStack.top()(api);
+    auto temp = callStack.top();
+    if (temp.func(api))
+    {
+		callStack.pop();
+        interrupt_codeRecorder.erase(temp.id);
+	}
 
     Commute::report(api);
     //ShipStep(api);
@@ -2335,7 +2295,7 @@ void AI::play(IShipAPI& api)
         //std::cout << ShipInfo::myself.me.x/1000 << "  " << ShipInfo::myself.me.y/1000 << ((ShipInfo::myself.mode == ATTACK) ? "  ATTACK\n" : "  NO!!!\n") << ShipInfo::myself.TargetPos.x << "  " << ShipInfo::myself.TargetPos.y<<std::endl;
 }
 
-void ShipStep(IShipAPI& api)
+bool ShipStep(IShipAPI& api)
 {
     ModeRetval res;
     res.immediate = false;
@@ -2375,15 +2335,11 @@ void ShipStep(IShipAPI& api)
     else if (nextMode == FOLLOW)
     {
     }
-    else if (nextMode == ROADSEARCH)
-    {
-        res = RoadSearchMode::Perform(api);
-        nextMode = res.mode;
-    }
     if (res.immediate)
     {
         ShipStep(api);
     }
+    return false;
 }
 
 //const char* get_placetype(THUAI7::PlaceType t);
