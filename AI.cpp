@@ -44,9 +44,9 @@ extern const bool asynchronous = false;
 
 #define Parameter_ResourceRunningOut (1)
 #define Parameter_ConstructionBuildUp (1)
-#define Parameter_EnemyBuildConstruction (2)
-#define Parameter_DestroyedEnemyCunstruction (3)
-#define Parameter_DestroyedFriendConstruction (4)
+#define Parameter_EnemyBuildConstruction (1<<1)
+#define Parameter_DestroyedEnemyCunstruction (1<<2)
+#define Parameter_DestroyedFriendConstruction (1<<3)
 
 #define ShipStepID 0
 #define DodgeID 1
@@ -803,10 +803,7 @@ namespace ShipAction
         {
             auto me = api.GetSelfInfo();
             double x = me->x, y = me->y;
-            std::cout << "(" << x << "," << y << ") -> "
-                      << "(" << target_x << "," << target_y << ")\n";
             double angle = atan2(target_y - y, target_x - x);
-            std::cout << "attack angle:" << angle / PI * 180 << std::endl;
             api.Attack(angle);
             return BT::NodeState::SUCCESS;
         }
@@ -1774,11 +1771,7 @@ namespace AttackMode
                 if (getHp(api, cur_target) == 0)
                 {
                     target.pop();
-                    if(MapInfo::fullmap[cur_target.x][cur_target.y]==MapInfo::Place::Construction)
-                    {
-                        ShipInfo::ReportBuffer = {Instruction_RefreshConstruction, Parameter_EnemyBuildConstruction, cur_target};
-                        Commute::report(api);
-                    }
+
                     return {
                         ATTACK,
                         false
@@ -2196,11 +2189,9 @@ void AI::play(IShipAPI& api)
                         case Parameter_EnemyBuildConstruction:
                             if (ShipInfo::myself.me.shipType==THUAI7::ShipType::MilitaryShip)
                             {
-                                AttackMode::target.push(ShipInfo::ShipBuffer.param_pos);
                             }
                             else if (ShipInfo::myself.me.shipType == THUAI7::ShipType::CivilianShip)
                             {
-                                MapInfo::PositionLists[MapInfo::Construction].erase(ShipInfo::ShipBuffer.param_pos);
                             }
                             else
                             {
@@ -2224,7 +2215,12 @@ void AI::play(IShipAPI& api)
 
     for (auto const& i : ShipInfo::Enemies)
     {
-        if (i->shipState == THUAI7::ShipState::Attacking && manhatten_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y,i->x,i->y)<=8000)
+        double dis = euclidean_distance(i->x, i->y, ShipInfo::myself.me.x, ShipInfo::myself.me.y);
+        if (dis >= WeaponToDis(i->weaponType) + 500)
+        {
+            continue;
+        }
+        if (i->shipState == THUAI7::ShipState::Attacking)
         {
             if(ShipInfo::myself.me.weaponType == THUAI7::WeaponType::NullWeaponType
             and interrupt_codeRecorder.find(ReturnHomeID) == interrupt_codeRecorder.end())
@@ -2327,6 +2323,7 @@ bool ShipStep(IShipAPI& api)
 {
     ModeRetval res;
     res.immediate = false;
+    std::cout << "nextMode:" << nextMode << '\n';
     if (nextMode == IDLE)
     {
         res = IdleMode::Perform(api);
