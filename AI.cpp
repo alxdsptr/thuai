@@ -51,6 +51,7 @@ extern const bool asynchronous = false;
 #define ShipStepID 0
 #define DodgeID 1
 #define RoadSearchID 2
+#define ReturnHomeID 3
 #define RATIO 1000
 
 // 选手需要依次将player1到player4的船类型在这里定义
@@ -430,20 +431,20 @@ bool judgeNear(int x, int y, THUAI7::PlaceType t)
         return true;
     }
     return false;
-};
+}
 
 inline int manhatten_distance(int x1, int y1, int x2, int y2)
 {
     return abs(x1 - x2) + abs(y1 - y2);
-};
+}
 inline int manhatten_distance(int x1, int y1, coordinate c)
 {
     return abs(x1 - c.x) + abs(y1 - c.y);
-};
+}
 double euclidean_distance(double x1, double y1, double x2, double y2)
 {
 	return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2));
-};
+}
 double euclidean_distance(coordinate x, coordinate y)
 {
     return sqrt((x.x - y.x) * (x.x - y.x) + (x.y - y.y) * (x.y - y.y));
@@ -487,16 +488,16 @@ namespace BT
         std::optional<std::function<bool(T& api)>> judgeSuccess;  ///< 补充用来判断是否成功的函数
         std::function<NodeState(T& api)> action;  ///< 待执行的函数
         eventNode(std::function<bool(T& api)> c, std::function<NodeState(T& api)> a) :
-            condition(c),
-            action(a),
             state(IDLE),
-            judgeSuccess(std::nullopt)
+            condition(c),
+            judgeSuccess(std::nullopt),
+            action(a)
         {}
         eventNode(std::function<bool(T& api)> c, std::function<NodeState(T& api)> a, std::function<bool(T& api)> jf):
-            condition(c),
-            action(a),
             state(IDLE),
-            judgeSuccess(jf)
+            condition(c),
+            judgeSuccess(jf),
+            action(std::move(a))
         {}
 
         NodeState perform(T& api)
@@ -529,9 +530,8 @@ namespace BT
             return state;
         }
 
-        ~eventNode()
-        {
-        }
+        ~eventNode() = default;
+
     };
     /**
      * @class baseNode
@@ -549,7 +549,7 @@ namespace BT
         {
         }
         virtual NodeState perform(T& api) = 0;
-        virtual ~baseNode(){}
+        virtual ~baseNode()= default;
     };
 
 
@@ -645,12 +645,12 @@ namespace BT
             }
         }
 
-        virtual ~SequenceNode()
+        ~SequenceNode() override
         {
             for (size_t i = 0; i < events.size(); i++)
             {
                 delete events[i];
-                events[i] = NULL;
+                events[i] = nullptr;
             }
         }
     };
@@ -760,7 +760,7 @@ namespace Conditions
     }
     auto PreAttack()
     {
-        return [=](IShipAPI& api) {
+        return [](IShipAPI& api) {
             return ShipInfo::myself.me.shipState == THUAI7::ShipState::Idle;
         };
     }
@@ -1150,16 +1150,12 @@ namespace IdleMode
     }
 }
 
-namespace AttackMode
-{
-
-}
 
 bool is_empty(int x, int y)
 {
     MapInfo::Place t = MapInfo::fullmap[x][y];
     return (t == MapInfo::Space or t == MapInfo::Shadow or t == MapInfo::OpenWormhole);
-};
+}
 class RoadSearch
 {
 public:
@@ -1314,7 +1310,7 @@ public:
             double time = sqrt(dx * dx + dy * dy) / 3.0;
             double angle = atan2(dy, dx);
             std::cout << "time: " << time << " angle: " << angle << std::endl;
-            auto res = api.Move(time, angle);
+            auto res = api.Move((int)time, angle);
             if (!res.get())
             {
                 std::cout << "move fail"; 
@@ -2223,29 +2219,49 @@ void AI::play(IShipAPI& api)
     {
         if (i->shipState == THUAI7::ShipState::Attacking)
         {
-
+            if(ShipInfo::myself.me.weaponType == THUAI7::WeaponType::NullWeaponType
+            and interrupt_codeRecorder.find(ReturnHomeID) == interrupt_codeRecorder.end())
+            {
+                double angle = i->facingDirection;
+                double move_angle = angle + PI / 2;
+                api.EndAllAction();
+                api.Move(300, move_angle);
+                coordinate target = *MapInfo::PositionLists[MapInfo::MyHome].begin();
+                auto end_condition = [](IShipAPI&){return false;};
+                auto search = std::make_shared<RoadSearch>(target, end_condition);
+                int prior = 3 * RATIO + callStack.size();
+                callStack.push({*search, ReturnHomeID, prior});
+                interrupt_codeRecorder.insert(ReturnHomeID);
+                return;
+            }
             if (interrupt_codeRecorder.find(DodgeID) == interrupt_codeRecorder.end())
             {
                 api.EndAllAction();
                 double angle = i->facingDirection;
                 double move_angle = angle + PI / 2;
                 // BT::SequenceNode<IShipAPI> dodgeNode{
-                auto init_list = {new BT::eventNode<IShipAPI>{Conditions::always_ship, ShipAction::MoveFunc(move_angle, 200)}, new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), ShipAction::AttackFunc(i->x, i->y)}};
+                auto init_list = {new BT::eventNode<IShipAPI>{Conditions::always_ship, ShipAction::MoveFunc(move_angle, 200)},
+                                  new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), ShipAction::AttackFunc(i->x, i->y)}};
                 auto dodgeNode = std::make_shared<BT::SequenceNode<IShipAPI>>(std::move(init_list));
-
-
-
 				interrupt_codeRecorder.insert(DodgeID);
                 int priority = 2 * RATIO + callStack.size();
 				callStack.push({[dodgeNode](IShipAPI& api)
                 { return dodgeNode->perform(api) == BT::SUCCESS; }, DodgeID, priority});
 			}
-
             break;
         }
-        else if (i->weaponType == THUAI7::WeaponType::NullWeaponType)
+        else if (i->weaponType == THUAI7::WeaponType::NullWeaponType and ShipInfo::myself.me.weaponType != THUAI7::WeaponType::NullWeaponType)
         {
-            api.Attack(atan2(i->y - ShipInfo::myself.me.y, i->x - ShipInfo::myself.me.x));
+            auto &state = ShipInfo::myself.me.shipState;
+            if(state != THUAI7::ShipState::Attacking and state != THUAI7::ShipState::Swinging)
+            {
+                double dis = euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, i->x, i->y);
+                if(dis < WeaponToDis(ShipInfo::myself.me.weaponType))
+                {
+                    api.EndAllAction();
+                    api.Attack(atan2(i->y - ShipInfo::myself.me.y, i->x - ShipInfo::myself.me.x));
+                }
+            }
         }
 
     }
@@ -2469,6 +2485,10 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
             if (res.get())
             {
                 iter = HomeInfo::reviveList.erase(iter);
+                if(iter == HomeInfo::reviveList.end())
+                {
+                    break;
+                }
             }
         }
     }
