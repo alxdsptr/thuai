@@ -803,7 +803,10 @@ namespace ShipAction
         {
             auto me = api.GetSelfInfo();
             double x = me->x, y = me->y;
+            std::cout << "(" << x << "," << y << ") -> "
+                      << "(" << target_x << "," << target_y << ")\n";
             double angle = atan2(target_y - y, target_x - x);
+            std::cout << "attack angle:" << angle / PI * 180 << std::endl;
             api.Attack(angle);
             return BT::NodeState::SUCCESS;
         }
@@ -2221,7 +2224,7 @@ void AI::play(IShipAPI& api)
 
     for (auto const& i : ShipInfo::Enemies)
     {
-        if (i->shipState == THUAI7::ShipState::Attacking)
+        if (i->shipState == THUAI7::ShipState::Attacking && manhatten_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y,i->x,i->y)<=8000)
         {
             if(ShipInfo::myself.me.weaponType == THUAI7::WeaponType::NullWeaponType
             and interrupt_codeRecorder.find(ReturnHomeID) == interrupt_codeRecorder.end())
