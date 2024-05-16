@@ -1,3 +1,4 @@
+#include <utility>
 #include <vector>
 #include <thread>
 #include <array>
@@ -314,7 +315,6 @@ namespace ShipInfo
         // THUAI7::Ship NearestEnemyShip;
         ShipMode mode=IDLE;
         THUAI7::Ship me;
-        coordinate TargetPos = {-1, -1};  //<注意为格子数，不是坐标值
         // THUAI7::ConstructionType ConsType;
         // const char end = '\0';
     };
@@ -1166,7 +1166,7 @@ public:
     std::function<bool(IShipAPI& api)> end_condition;
     RoadSearch(coordinate target, std::function<bool(IShipAPI& api)> end_condition) :
         target(target),
-        end_condition(end_condition)
+        end_condition(std::move(end_condition))
     {
 	}
     std::deque<coordinate> search_road(int x1, int y1, int x2, int y2)
@@ -1533,10 +1533,10 @@ namespace ConstructMode
             }
             else if (!Myside(res.first))
             {
-                MapInfo::PositionLists[MapInfo::Construction].erase(ShipInfo::myself.TargetPos);
+                MapInfo::PositionLists[MapInfo::Construction].erase(target);
                 ShipInfo::ReportBuffer = {Instruction_RefreshConstruction, Parameter_EnemyBuildConstruction, target};
                 Commute::report(api);
-                ShipInfo::myself.TargetPos = {-1, -1};
+                target = {-1, -1};
                 /*
                 if (GetNearestConstruction(api))
                 {
@@ -1765,10 +1765,11 @@ namespace AttackMode
     {
         if (!target.empty())
         {
-            if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, target.front().x * 1000 + 500, target.front().y * 1000 + 500) 
+            auto cur_target = target.front();
+            if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, cur_target.x * 1000 + 500, cur_target.y * 1000 + 500)
                 <= WeaponToDis(ShipInfo::myself.me.weaponType) + 200)
             {
-                if (getHp(api, target.front()) == 0)
+                if (getHp(api, cur_target) == 0)
                 {
                     target.pop();
 
@@ -1782,7 +1783,7 @@ namespace AttackMode
                     api.EndAllAction();
                 }
 
-                double angle = atan2(ShipInfo::myself.TargetPos.y * 1000 + 500 - ShipInfo::myself.me.y, ShipInfo::myself.TargetPos.x * 1000 + 500 - ShipInfo::myself.me.x);
+                double angle = atan2(cur_target.y * 1000 + 500 - ShipInfo::myself.me.y, cur_target.x * 1000 + 500 - ShipInfo::myself.me.x);
                 // double angle = -0.3;
                 std::cout << "mydirect: " << ShipInfo::myself.me.facingDirection << std::endl;
                 std::cout << "angle: " << angle << std::endl;
@@ -1794,12 +1795,12 @@ namespace AttackMode
             }
             else
             {
-                auto end_condition = [](IShipAPI& api)
+                auto end_condition = [cur_target](IShipAPI& api)
                 {
-                    return (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, ShipInfo::myself.TargetPos.x * 1000 + 500, ShipInfo::myself.TargetPos.y * 1000 + 500) 
-                        <= WeaponToDis(ShipInfo::myself.me.weaponType) + 200 and api.HaveView(ShipInfo::myself.TargetPos.x * 1000 + 500, ShipInfo::myself.TargetPos.y * 1000 + 500));
+                    return (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, cur_target.x * 1000 + 500, cur_target.y * 1000 + 500)
+                        <= WeaponToDis(ShipInfo::myself.me.weaponType) + 200 and api.HaveView(cur_target.y * 1000 + 500, cur_target.y * 1000 + 500));
                 };
-                auto search = std::make_shared<RoadSearch>(target.front(), end_condition);
+                auto search = std::make_shared<RoadSearch>(cur_target, end_condition);
                 int priority = 1 * RATIO + callStack.size();
                 callStack.push({*search, RoadSearchID, priority});
 
@@ -1814,9 +1815,7 @@ namespace AttackMode
             ATTACK,
             false
         };
-
     }
-
 }
 
 
@@ -2404,8 +2403,9 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
                 switch (tmp.param)
                 {
                     case Parameter_ResourceRunningOut:
-                        MapInfo::resource_cnt--;
-                        if (MapInfo::resource_cnt == 0)
+                        //MapInfo::resource_cnt--;
+                        MapInfo::PositionLists[MapInfo::Resource].erase(tmp.param_pos);
+                        if (MapInfo::PositionLists[MapInfo::Resource].empty())
                         {
                             HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[0]].Mode = CONSTRUCT;
                         }
