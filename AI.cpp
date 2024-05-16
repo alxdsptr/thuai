@@ -1,4 +1,3 @@
-#include <utility>
 #include <vector>
 #include <thread>
 #include <array>
@@ -1850,7 +1849,7 @@ auto WrapperFunc(std::function<BT::NodeState(IShipAPI& api)> func)
         }
     };
 }*/
-int Ship_Init = 1;
+
 /*
 void clear(IShipAPI& api)
 {
@@ -2100,7 +2099,7 @@ auto detectEnemy=[](IShipAPI& api)
 };*/
 
 
-
+int Ship_Init = 1;
 
 void AI::play(IShipAPI& api)
 {
@@ -2114,9 +2113,6 @@ void AI::play(IShipAPI& api)
     }
     if (Commute::RefreshInfo(api))
     {
-        std::cout << "Success\n"
-                  << ((ShipInfo::ShipBuffer.Mode == PRODUCE) ? "PRODUCE\n" : "NO!!!\n");
-        
         if (ShipInfo::myself.mode!=ShipInfo::ShipBuffer.Mode)
         {
             //clear(api);
@@ -2322,6 +2318,7 @@ bool ShipStep(IShipAPI& api)
 {
     ModeRetval res;
     res.immediate = false;
+    std::cout << "nextMode:" << nextMode << '\n';
     if (nextMode == IDLE)
     {
         res = IdleMode::Perform(api);
@@ -2329,7 +2326,8 @@ bool ShipStep(IShipAPI& api)
     }
     else if (nextMode == ATTACK)
     {
-        std::cout << "mydirect: " << ShipInfo::myself.me.facingDirection << std::endl;
+
+        std::cout << "EnterAttack, mydirect: " << ShipInfo::myself.me.facingDirection << std::endl;
         res = AttackMode::Perform(api);
         nextMode = res.mode;
     }
@@ -2366,12 +2364,7 @@ bool ShipStep(IShipAPI& api)
 }
 
 //const char* get_placetype(THUAI7::PlaceType t);
-bool hasSend = false;
-bool hasInstall = false;
-bool hasBuild = false;
-bool BuildSecondCivil = false;
 
-volatile int Ind = 2;
 
 
 
