@@ -44,9 +44,9 @@ extern const bool asynchronous = false;
 
 #define Parameter_ResourceRunningOut (1)
 #define Parameter_ConstructionBuildUp (1)
-#define Parameter_EnemyBuildConstruction (1<<1)
-#define Parameter_DestroyedEnemyCunstruction (1<<2)
-#define Parameter_DestroyedFriendConstruction (1<<3)
+#define Parameter_EnemyBuildConstruction (2)
+#define Parameter_DestroyedEnemyCunstruction (3)
+#define Parameter_DestroyedFriendConstruction (4)
 
 #define ShipStepID 0
 #define DodgeID 1
@@ -1771,7 +1771,11 @@ namespace AttackMode
                 if (getHp(api, cur_target) == 0)
                 {
                     target.pop();
-
+                    if(MapInfo::fullmap[cur_target.x][cur_target.y]==MapInfo::Place::Construction)
+                    {
+                        ShipInfo::ReportBuffer = {Instruction_RefreshConstruction, Parameter_EnemyBuildConstruction, cur_target};
+                        Commute::report(api);
+                    }
                     return {
                         ATTACK,
                         false
@@ -2189,9 +2193,11 @@ void AI::play(IShipAPI& api)
                         case Parameter_EnemyBuildConstruction:
                             if (ShipInfo::myself.me.shipType==THUAI7::ShipType::MilitaryShip)
                             {
+                                AttackMode::target.push(ShipInfo::ShipBuffer.param_pos);
                             }
                             else if (ShipInfo::myself.me.shipType == THUAI7::ShipType::CivilianShip)
                             {
+                                MapInfo::PositionLists[MapInfo::Construction].erase(ShipInfo::ShipBuffer.param_pos);
                             }
                             else
                             {
@@ -2318,7 +2324,6 @@ bool ShipStep(IShipAPI& api)
 {
     ModeRetval res;
     res.immediate = false;
-    std::cout << "nextMode:" << nextMode << '\n';
     if (nextMode == IDLE)
     {
         res = IdleMode::Perform(api);
