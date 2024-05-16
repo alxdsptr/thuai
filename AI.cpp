@@ -235,11 +235,9 @@ namespace MapInfo
 
 
     Place fullmap[50][50];
-    Place ori_fullmap[50][50];
 
 
     THUAI7::PlaceType map[maxLen][maxLen];
-    THUAI7::PlaceType ori_map[maxLen][maxLen];
 
 
 //    std::unordered_set<coordinate, PointHash> des_list[4];
@@ -306,9 +304,7 @@ namespace MapInfo
             for (size_t j = 0; j < 50; j++)
             {
                 map[i][j] = mp[i][j];
-                ori_map[i][j] = mp[i][j];
                 fullmap[i][j] = PlaceTypeConvert(mp[i][j], i, j);
-                ori_fullmap[i][j] = PlaceTypeConvert(mp[i][j], i, j);
                 //PositionLists[PlaceTypeConvert(mp[i][j])].insert(coordinate(i, j));
                 PositionLists[fullmap[i][j]].insert(coordinate(i, j));
                 Ori_PositionLists[fullmap[i][j]].insert(coordinate(i, j));
@@ -1120,8 +1116,18 @@ namespace Commute
         memcpy(message.data(), &ShipInfo::ReportBuffer, REPORTBUFFER_SIZE);
         api.SendBinaryMessage(0, message);
     }
-    std::deque<ReportBuffer> reports;
-    std::deque<int> report_ids;
+    std::deque<ReportBuffer> reports_to_send;
+    //std::deque<int> report_ids;
+    void set_report(ReportBuffer& report)
+    {
+        for (size_t i = 0; i < 4; i++)
+        {
+			HomeInfo::TeamShipBuffer[i].with_param = true;
+			HomeInfo::TeamShipBuffer[i].instruction = report.instruction;
+			HomeInfo::TeamShipBuffer[i].param = report.param;
+			HomeInfo::TeamShipBuffer[i].param_pos = report.param_pos;
+		}
+    }
     void receive_message(ITeamAPI& api)
     {
         while (api.HaveMessage())
@@ -1129,12 +1135,31 @@ namespace Commute
             auto mes = api.GetMessage();
             std::string message = mes.second;
             Commute::ReportBuffer temp;
-            memcpy(&temp, message.data(), REPORTBUFFER_SIZE);
-            reports.push_back(std::move(temp));
-            report_ids.push_back(mes.first);
+            //memcpy(&temp, message.data(), REPORTBUFFER_SIZE);
+            if (temp.instruction == Instruction_AttackState and temp.param == Parameter_AttackSuccess)
+            {
+                HomeInfo::TeamShipBuffer[mes.first].Mode = IDLE;
+                continue;
+            }
+            if (temp.instruction == Instruction_RefreshResource and temp.param == Parameter_ResourceRunningOut)
+            {
+                MapInfo::PositionLists[MapInfo::Resource].erase(temp.param_pos);
+                if (MapInfo::PositionLists[MapInfo::Resource].empty())
+                {
+                    HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[0]].Mode = CONSTRUCT;
+                }
+            }
+            reports_to_send.push_back(temp);
         }
     }
-
+    void process_message()
+    {
+        if (!reports_to_send.empty())
+        {
+            set_report(reports_to_send.front());
+            reports_to_send.pop_front();
+        }
+    }
 }
 
 
@@ -2495,101 +2520,12 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     {
         HomeInfo::TeamShipBuffer[i].with_param = false;
     }
-    if (!Commute::reports.empty())
-    {
-        for (size_t i = 0; i < 4; i++)
-        {
-            HomeInfo::TeamShipBuffer[i].with_param = true;
-        }
-        Commute::ReportBuffer tmp = Commute::reports.front();
-        Commute::reports.pop_front();
-        switch (tmp.instruction)
-        {
-            case Instruction_RefreshResource:
-                switch (tmp.param)
-                {
-                    case Parameter_ResourceRunningOut:
-                        //MapInfo::resource_cnt--;
-                        MapInfo::PositionLists[MapInfo::Resource].erase(tmp.param_pos);
-                        if (MapInfo::PositionLists[MapInfo::Resource].empty())
-                        {
-                            HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[0]].Mode = CONSTRUCT;
-                        }
-                        for (size_t i = 0; i < 4; i++)
-                        {
-                            HomeInfo::TeamShipBuffer[i].with_param = 1;
-                            HomeInfo::TeamShipBuffer[i].instruction = Instruction_RefreshResource;
-                            HomeInfo::TeamShipBuffer[i].param = Parameter_ResourceRunningOut;
-                            HomeInfo::TeamShipBuffer[i].param_pos = tmp.param_pos;
-                        }
-                        break;
-                    default:
-                        break;
-                }
-                break;
-            case Instruction_RefreshConstruction:
-                switch (ShipInfo::ShipBuffer.param)
-                {
-                    case Parameter_ConstructionBuildUp:
-                        for (size_t i = 0; i < 4; i++)
-                        {
-                            HomeInfo::TeamShipBuffer[i].with_param = 1;
-                            HomeInfo::TeamShipBuffer[i].instruction = Instruction_RefreshConstruction;
-                            HomeInfo::TeamShipBuffer[i].param = Parameter_ConstructionBuildUp;
-                            HomeInfo::TeamShipBuffer[i].param_pos = tmp.param_pos;
-                        }
-                        break;
-                    case Parameter_EnemyBuildConstruction:
-                        for (size_t i = 0; i < 4; i++)
-                        {
-                            HomeInfo::TeamShipBuffer[i].with_param = 1;
-                            HomeInfo::TeamShipBuffer[i].instruction = Instruction_RefreshConstruction;
-                            HomeInfo::TeamShipBuffer[i].param = Parameter_EnemyBuildConstruction;
-                            HomeInfo::TeamShipBuffer[i].param_pos = tmp.param_pos;
-                        }
-                        break;
-                    case Parameter_DestroyedEnemyCunstruction:
-                        for (size_t i = 0; i < 4; i++)
-                        {
-                            HomeInfo::TeamShipBuffer[i].with_param = 1;
-                            HomeInfo::TeamShipBuffer[i].instruction = Instruction_RefreshConstruction;
-                            HomeInfo::TeamShipBuffer[i].param = Parameter_DestroyedEnemyCunstruction;
-                            HomeInfo::TeamShipBuffer[i].param_pos = tmp.param_pos;
-                        }
-                        break;
-                    case Parameter_DestroyedFriendConstruction:
-                        for (size_t i = 0; i < 4; i++)
-                        {
-                            HomeInfo::TeamShipBuffer[i].with_param = 1;
-                            HomeInfo::TeamShipBuffer[i].instruction = Instruction_RefreshConstruction;
-                            HomeInfo::TeamShipBuffer[i].param = Parameter_DestroyedFriendConstruction;
-                            HomeInfo::TeamShipBuffer[i].param_pos = tmp.param_pos;
-                        }
-                        break;
-                    default:
-                        break;
-                }
-                break;
-            case Instruction_AttackState:
-                switch (ShipInfo::ShipBuffer.param)
-                {
-                    case Parameter_AttackSuccess:
-                        HomeInfo::TeamShipBuffer[Commute::report_ids.front()].Mode = IDLE;
-                        break;
-                    default:
-                        break;
-                }
-                break;
-            default:
-                break;
-        }
-        Commute::report_ids.pop_front();
-    }
     /*
     if (HomeInfo::first_id != 1)
     {
         root.events[0] = new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(1 << (HomeInfo::first_id - 1),PRODUCE)});
     }*/
+    Commute::process_message();
     if (!HomeInfo::reviveList.empty())
     {
         for (auto iter = HomeInfo::reviveList.begin(); iter != HomeInfo::reviveList.end(); iter++)
@@ -2652,346 +2588,3 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     new BT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)})*/
 
 }
-
-/*
-std::deque<coordinate> search_road(int x1, int y1, int x2, int y2)
-{
-    std::priority_queue<node> pq;
-    pq.push({x1, y1, coordinate{-1, -1}, 0, (double)manhatten_distance(x1, y1, x2, y2)});
-    memset(visited, false, sizeof(visited));
-    while (!pq.empty())
-    {
-        node now = pq.top();
-        pq.pop();
-        if (visited[now.x][now.y])
-            continue;
-        visited[now.x][now.y] = true;
-        from[now.x][now.y] = now.from;
-        if (now.x == x2 && now.y == y2)
-        {
-            std::deque<coordinate> path;
-            path.push_back({now.x, now.y});
-            coordinate temp = now.from;
-            while (temp.x != -1)
-            {
-                path.push_front({temp.x, temp.y});
-                temp = from[temp.x][temp.y];
-            }
-            path.pop_front();
-            return path;
-        }
-        auto is_empty = [](THUAI7::PlaceType t)
-        {
-            return t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole;
-        };
-        for (int i = -1; i <= 1; i++)
-        {
-            for (int j = -1; j <= 1; j++)
-            {
-                if (i == 0 and j == 0)
-                    continue;
-                if (i == -1 and j == -1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
-                    continue;
-                if (i == 1 and j == -1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
-                    continue;
-                if (i == -1 and j == 1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
-                    continue;
-                if (i == 1 and j == 1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
-                    continue;
-                int nx = now.x + i, ny = now.y + j;
-                if (nx < 0 or nx >= 50 or ny < 0 or ny >= 50 or visited[nx][ny])
-                    continue;
-                if (nx == x2 and ny == y2)
-                {
-                    double cost = sqrt(i * i + j * j);
-                    pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, 0});
-                }
-                THUAI7::PlaceType t = MapInfo::map[nx][ny];
-                if (t != THUAI7::PlaceType::Space and t != THUAI7::PlaceType::Shadow and t != THUAI7::PlaceType::Wormhole)
-                    continue;
-                double cost = sqrt(i * i + j * j);
-                int h = manhatten_distance(nx, ny, x2, y2);
-                pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, (double)h});
-            }
-        }
-    }
-}
-std::deque<coordinate> search_road(int x1, int y1, THUAI7::PlaceType type, IShipAPI& api)
-{
-    int min_dis = 0x7fffffff, index = MapInfo::getIndex(type);
-    auto& des = MapInfo::des_list[index];
-    for (auto i = des.begin(); i != des.end();)
-    {
-        if (type == THUAI7::PlaceType::Resource)
-        {
-            std::cout << "x: " << (*i).x << " y: " << (*i).y << std::endl;
-            int temp = api.GetResourceState((*i).x, (*i).y);
-            if (temp == 0)
-            {
-                i = des.erase(i);
-                continue;
-            }
-        }
-        else if (type == THUAI7::PlaceType::Construction and api.GetConstructionHp((*i).x, (*i).y) > 0)
-        {
-            i = des.erase(i);
-            continue;
-        }
-        int temp = manhatten_distance(x1, y1, *i);
-        if (temp < min_dis)
-            min_dis = temp;
-        i++;
-    }
-    std::priority_queue<node> pq;
-    pq.push({x1, y1, coordinate{-1, -1}, 0, (double)min_dis});
-    memset(visited, false, sizeof(visited));
-    while (!pq.empty())
-    {
-        node now = pq.top();
-        pq.pop();
-        if (visited[now.x][now.y])
-            continue;
-        visited[now.x][now.y] = true;
-        from[now.x][now.y] = now.from;
-        if (des.find({now.x, now.y}) != des.end())
-        {
-            std::deque<coordinate> path;
-            path.push_back({now.x, now.y});
-            coordinate temp = now.from;
-            while (temp.x != -1)
-            {
-                path.push_front({temp.x, temp.y});
-                temp = from[temp.x][temp.y];
-            }
-            path.pop_front();
-            return path;
-        }
-        auto is_empty = [](THUAI7::PlaceType t)
-        {
-            return t == THUAI7::PlaceType::Space or t == THUAI7::PlaceType::Shadow or t == THUAI7::PlaceType::Wormhole;
-        };
-        for (int i = -1; i <= 1; i++)
-        {
-            for (int j = -1; j <= 1; j++)
-            {
-                if (i == 0 and j == 0)
-                    continue;
-                if (i == -1 and j == -1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
-                    continue;
-                if (i == 1 and j == -1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y - 1])))
-                    continue;
-                if (i == -1 and j == 1 and (!is_empty(MapInfo::map[now.x - 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
-                    continue;
-                if (i == 1 and j == 1 and (!is_empty(MapInfo::map[now.x + 1][now.y]) or !is_empty(MapInfo::map[now.x][now.y + 1])))
-                    continue;
-                int nx = now.x + i, ny = now.y + j;
-                if (nx < 0 or nx >= 50 or ny < 0 or ny >= 50 or visited[nx][ny])
-                    continue;
-                if (des.find({nx, ny}) != des.end() and (i == 0 or j == 0))
-                {
-                    double cost = sqrt(i * i + j * j);
-                    pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, 0});
-                }
-                THUAI7::PlaceType t = MapInfo::map[nx][ny];
-                if (t != THUAI7::PlaceType::Space and t != THUAI7::PlaceType::Shadow and t != THUAI7::PlaceType::Wormhole)
-                    continue;
-                double cost = sqrt(i * i + j * j);
-                min_dis = 0x7fffffff;
-                for (auto const& k : des)
-                {
-                    int temp = manhatten_distance(x1, y1, k);
-                    if (temp < min_dis)
-                        min_dis = temp;
-                }
-                pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, (double)min_dis});
-            }
-        }
-    }
-}
-*/
-/*
-    **
-     * @brief 节点功能：反复执行子节点，直到返回SUCCESS
-     *
-     *
-    class TryUntilSuccessNode : public baseNode
-    {
-    public:
-        baseNode* child;
-        TryUntilSuccessNode(baseNode* x) :
-            baseNode(RUNNING),
-            child(x)
-        {
-        }
-
-        /**
-         * @brief TryUntilSuccess对应的perform虚函数
-         * @param api
-         * @return 若子节点返回SUCCESS或当前状态已经为SUCCESS，则返回SUCCESS；反之返回RUNNING
-         *
-        virtual NodeState perform(ITeamAPI& api)
-        {
-            if (state == IDLE)
-            {
-                state = RUNNING;
-            }
-            else if (state == RUNNING)
-            {
-                switch (child->perform(api))
-                {
-                    case SUCCESS:
-                        state = SUCCESS;
-                        child->state = IDLE;
-                        break;
-                    case FAIL:
-                        child->state = IDLE;
-                        break;
-                    default:
-                        break;
-                }
-            }
-            return state;
-        }
-
-        virtual ~TryUntilSuccessNode()
-        {
-            delete child;
-            child = NULL;
-        }
-    };
-
-    /**
-     * @brief decorator节点，执行一次子节点，不论子节点返回值如何，均返回SUCCESS
-     
-    class AlwaysSuccessNode : public baseNode
-    {
-    public:
-        baseNode* child;  ///< 要执行的子节点
-        AlwaysSuccessNode(baseNode* x) :
-            baseNode(IDLE),
-            child(x)
-        {
-        }
-
-        virtual NodeState perform(ITeamAPI& api)
-        {
-            if (state == IDLE)
-            {
-                state = RUNNING;
-            }
-            if (state == RUNNING)
-            {
-                switch (child->perform(api))
-                {
-                    case RUNNING:
-                        state = RUNNING;
-                        break;
-                    default:
-                        state = SUCCESS;
-                        break;
-                }
-            }
-            return state;
-        }
-
-        virtual ~AlwaysSuccessNode()
-        {
-            delete child;
-            child = NULL;
-        }
-    };
-
-    /**
-     * @brief 选择器节点，依次尝试每个子节点，直到有一个成功或全部失败
-     */
-    /*
-    class fallbackNode : public baseNode
-    {
-    private:
-        inline void ResetChildren()
-        {
-            for (size_t i = 0; i < events.size(); i++)
-            {
-                events[i]->state = IDLE;
-            }
-            curChild = 0;
-        }
-
-    public:
-        std::vector<baseNode*> events;
-        int curChild;
-*/
-        /**
-         * @brief 选择器节点的perform函数
-         * - 如果当前子节点返回SUCCESS，则重置全部子节点状态，本节点状态设为SUCCESS并返回SUCCESS
-         * - 如果当前子节点返回RUNNING，下一次调用时仍调用该子节点，直到它返回FAIL或SUCCESS；返回RUNNING
-         * - 如果当前子节点返回FAIL
-         *  . 如果已经是最后一个子节点，则本节点状态为FAIL，返回FAIL
-         *  . 否则下一次调用执行下一个子节点，本次返回RUNNING
-         * @param api
-         * @return
-     */
-    /*
-        virtual NodeState perform(ITeamAPI& api)
-        {
-            switch (state)
-            {
-                case IDLE:
-                    state = RUNNING;
-                    break;
-                case RUNNING:
-                    break;
-                default:
-                    return state;
-                    break;
-            }
-
-            switch (events[curChild]->perform(api))
-            {
-                case RUNNING:
-                    break;
-                case FAIL:
-                    if (curChild == events.size() - 1)
-                    {
-                        state = FAIL;
-                        ResetChildren();
-                    }
-                    else
-                    {
-                        curChild++;
-                    }
-                    break;
-                case SUCCESS:
-                    state = SUCCESS;
-                    ResetChildren();
-                    break;
-                default:
-                    break;
-            }
-            return state;
-        }
-
-        fallbackNode(std::initializer_list<baseNode*> l) :
-            events(l),
-            curChild(0)
-        {
-        }
-
-        fallbackNode(const fallbackNode& a) :
-            curChild(0)
-        {
-            for (size_t i = 0; i < a.events.size(); i++)
-            {
-                events.push_back(new auto(*a.events[i]));
-            }
-        }
-
-        virtual ~fallbackNode()
-        {
-            for (size_t i = 0; i < events.size(); i++)
-            {
-                delete events[i];
-                events[i] = NULL;
-            }
-        }
-    };*/
