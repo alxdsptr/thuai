@@ -2471,7 +2471,7 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
             }
             if (res.get())
             {
-                HomeInfo::reviveList.erase(iter);
+                iter = HomeInfo::reviveList.erase(iter);
             }
         }
     }
