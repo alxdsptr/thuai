@@ -11,6 +11,7 @@
 #include<algorithm>
 
 
+#define DEBUG
 #define maxLen 55
 // 注意不要使用conio.h，Windows.h等非标准库
 // 为假则play()期间确保游戏状态不更新，为真则只保证游戏状态在调用相关方法时不更新，大致一帧更新一次
@@ -46,7 +47,7 @@ extern const bool asynchronous = false;
 #define Parameter_ResourceRunningOut (1)
 #define Parameter_ConstructionBuildUp (1)
 #define Parameter_EnemyBuildConstruction (1<<1)
-#define Parameter_DestroyedEnemyCunstruction (1<<2)
+#define Parameter_DestroyedEnemyConstruction (1<<2)
 #define Parameter_DestroyedFriendConstruction (1<<3)
 #define Parameter_AttackSuccess (1<<4)
 
@@ -1105,12 +1106,9 @@ namespace Commute
             api.SendBinaryMessage(index, message);
         }
     }
-    void report(IShipAPI& api)
+    void report(IShipAPI& api, unsigned char instruc, unsigned char param, coordinate target = {-1, -1})
     {
-        if (ShipInfo::ReportBuffer.instruction == 0)
-        {
-			return;
-		}
+        ShipInfo::ReportBuffer = {instruc, param, target};
         std::string message;
         message.resize(REPORTBUFFER_SIZE + 1);
         memcpy(message.data(), &ShipInfo::ReportBuffer, REPORTBUFFER_SIZE);
@@ -1176,6 +1174,7 @@ class RoadSearch
 public:
     coordinate target, last_location = {-1, -1};
     std::deque<coordinate> path;
+    double last_angle = 0;
     bool visited[maxLen][maxLen];
     coordinate from[maxLen][maxLen];
     std::function<bool(IShipAPI& api)> end_condition;
@@ -1245,6 +1244,7 @@ public:
                 }
             }
         }
+        return {};
     }
     bool operator()(IShipAPI &api)
     {
@@ -1262,6 +1262,7 @@ public:
         }
         if (api.GetSelfInfo()->shipState == THUAI7::ShipState::Idle and !path.empty())
         {
+            last_location = {ShipInfo::myself.me.x, ShipInfo::myself.me.y};
             std::vector<std::pair<coordinate, MapInfo::Place>> temp;
             auto saveAndChange = [&temp](int x, int y)
             {
@@ -1302,30 +1303,33 @@ public:
             {
 				ProcessNearbyShip(ship);
 			}
-            if(!temp.empty())
-                path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target.x, target.y);
-            else if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, path.front().x * 1000 + 500, path.front().y * 1000 + 500) > 1500)
+            if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, last_location.x, last_location.y) < 100)
+            {
+                api.Move(300, last_angle + PI);
+                return false;
+			}
+            else if (!temp.empty() or euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, path.front().x * 1000 + 500, path.front().y * 1000 + 500) > 1500)
             {
                 path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target.x, target.y);
             }
-            else if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, last_location.x, last_location.y) < 500)
-            {
-                path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target.x, target.y);
-			}
-            for (const auto & i : temp)
+            for (const auto& i : temp)
             {
                 MapInfo::fullmap[i.first.x][i.first.y] = i.second;
             }
+
             auto next = path.front();
             path.pop_front();
             int dx = next.x * 1000 + 500 - ShipInfo::myself.me.x;
             int dy = next.y * 1000 + 500 - ShipInfo::myself.me.y;
-            std::cout << "x: " << ShipInfo::myself.me.x << " y: " << ShipInfo::myself.me.y << "nx: " << next.x << "ny: " << next.y << std::endl;
-            std::cout << "dx: " << dx << " dy: " << dy << std::endl;
             double time = sqrt(dx * dx + dy * dy) / 3.0;
             double angle = atan2(dy, dx);
+            #ifdef DEBUG
+            std::cout << "x: " << ShipInfo::myself.me.x << " y: " << ShipInfo::myself.me.y << "nx: " << next.x << "ny: " << next.y << std::endl;
+            std::cout << "dx: " << dx << " dy: " << dy << std::endl;
             std::cout << "time: " << time << " angle: " << angle << std::endl;
+            #endif
             auto res = api.Move((int)time, angle);
+            last_angle = angle;
             if (!res.get())
             {
                 std::cout << "move fail"; 
@@ -1452,6 +1456,15 @@ std::unordered_set<int> interrupt_codeRecorder;
 std::priority_queue<callFunc> callStack;
 
 
+inline bool Myside(int i)
+{
+    return (i==ShipInfo::myself.me.teamID);
+}
+inline bool ConstructionFullHp(int curHp, THUAI7::ConstructionType a)
+{
+    return (curHp >= ((a == THUAI7::ConstructionType::Factory) ? 8000 : ((a == THUAI7::ConstructionType::Fort) ? 12000 : 6000)));
+}
+
 namespace IdleMode
 {
     std::unordered_set<coordinate, PointHash> InspectionList;
@@ -1500,30 +1513,37 @@ namespace IdleMode
             if (near_enough(api))
             {
                 auto construction_stat = api.GetConstructionState(target.x, target.y);
-                if (construction_stat.first != ShipInfo::myself.me.teamID)
+                if(!construction_stat.has_value())
                 {
-                    if (construction_stat.second > 0)
+                    InspectionList.erase(target);
+                    target = {-1, -1};
+                    return true;
+                }
+                auto construction = construction_stat.value();
+                if(Myside(construction.teamID))
+                {
+                    InspectionList.erase(target);
+                    target = {-1, -1};
+                    if(!ConstructionFullHp(construction.hp, construction.constructionType)){
+                        Commute::report(api, Instruction_RefreshConstruction, Parameter_DestroyedFriendConstruction, target);
+                    }
+                    return true;
+                }
+                if (construction.hp > 0)
+                {
+                    if (ShipInfo::myself.me.shipState != THUAI7::ShipState::Attacking and ShipInfo::myself.me.shipState != THUAI7::ShipState::Swinging)
                     {
-                        if (ShipInfo::myself.me.shipState != THUAI7::ShipState::Attacking && ShipInfo::myself.me.shipState != THUAI7::ShipState::Swinging)
-                        {
-                            api.Attack(atan2(target.y * 1000 + 500 - ShipInfo::myself.me.y, target.x * 1000 + 500 - ShipInfo::myself.me.x));
-                            std::cout << atan2(target.y * 1000 + 500 - ShipInfo::myself.me.y, target.x * 1000 + 500 - ShipInfo::myself.me.x) << std::endl;
-                        }
                         api.Attack(atan2(target.y * 1000 + 500 - ShipInfo::myself.me.y, target.x * 1000 + 500 - ShipInfo::myself.me.x));
-                        return false;
+                        std::cout << atan2(target.y * 1000 + 500 - ShipInfo::myself.me.y, target.x * 1000 + 500 - ShipInfo::myself.me.x) << std::endl;
                     }
-                    else
-                    {
-                        InspectionList.erase(target);
-                        api.EndAllAction();
-                        target = {-1, -1};
-                        return true;
-                    }
+                    return false;
                 }
                 else
                 {
                     InspectionList.erase(target);
+                    api.EndAllAction();
                     target = {-1, -1};
+                    Commute::report(api, Instruction_RefreshConstruction, Parameter_DestroyedEnemyConstruction, target);
                     return true;
                 }
             }
@@ -1542,7 +1562,6 @@ namespace IdleMode
     {
     }
 }
-
 
 namespace ConstructMode
 {
@@ -1569,16 +1588,6 @@ namespace ConstructMode
         return true;
     }
 
-    inline bool Constructed(int curHp, THUAI7::ConstructionType a)
-    {
-        return (curHp >= ((a == THUAI7::ConstructionType::Factory) ? 8000 : ((a == THUAI7::ConstructionType::Fort) ? 12000 : 6000)));
-    }
-
-    inline bool Myside(int i)
-    {
-        return (i==ShipInfo::myself.me.teamID);
-    }
-
     auto near_enough = [](IShipAPI& api)
     {
         // return (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, ShipInfo::myself.TargetPos.x, ShipInfo::myself.TargetPos.y) <= 1);
@@ -1598,30 +1607,42 @@ namespace ConstructMode
         }
         if (near_enough(api))
         {
+            std::cout << "near enough" << std::endl;
             auto res = api.GetConstructionState(target.x, target.y);
-            if (!Myside(res.first))
+            if(!res.has_value()){
+                std::cout << "no construction" << std::endl;
+                if (ShipInfo::myself.me.shipState != THUAI7::ShipState::Constructing)
+                {
+                    api.EndAllAction();
+                    api.Construct(ShipInfo::constructType);
+                }
+                return false;
+            }
+            auto construction = res.value();
+            if (!Myside(construction.teamID))
             {
+                std::cout << "enemy construction" << std::endl;
                 MapInfo::PositionLists[MapInfo::Construction].erase(target);
-                ShipInfo::ReportBuffer = {Instruction_RefreshConstruction, Parameter_EnemyBuildConstruction, target};
-                Commute::report(api);
+                //TODO! 通知军舰攻击建筑
+                Commute::report(api, Instruction_RefreshConstruction, Parameter_EnemyBuildConstruction, target);
                 target = {-1, -1};
                 return true;
             }
-            else if (Constructed(res.second,ShipInfo::constructType))
+            else if (ConstructionFullHp(construction.hp, construction.constructionType))
             {
-
+                std::cout << "full hp construction" << std::endl;
                 MapInfo::PositionLists[MapInfo::Construction].erase(target);
-                ShipInfo::ReportBuffer = {Instruction_RefreshConstruction, Parameter_ConstructionBuildUp, target};
-                Commute::report(api);
+                Commute::report(api, Instruction_RefreshConstruction, Parameter_ConstructionBuildUp, target);
                 target = {-1, -1};
                 return true;
             }
             else
             {
+                std::cout << "half hp construction" << std::endl;
                 if (ShipInfo::myself.me.shipState != THUAI7::ShipState::Constructing)
                 {
                     api.EndAllAction();
-                    api.Construct(ShipInfo::constructType);
+                    api.Construct(construction.constructionType);
                 }
             }
         }
@@ -1691,8 +1712,7 @@ namespace ProduceMode
             else
             {
                 MapInfo::PositionLists[MapInfo::Resource].erase(target);
-                ShipInfo::ReportBuffer = {Instruction_RefreshResource, Parameter_ResourceRunningOut, target};
-                Commute::report(api);
+                Commute::report(api, Instruction_RefreshResource, Parameter_ResourceRunningOut, target);
                 target = {-1, -1};
                 return true;
             }
@@ -1717,6 +1737,7 @@ namespace AttackMode
 {
     std::queue<coordinate> target;
 
+    /*
     int getHp(IShipAPI& api,coordinate tar)
     {
         THUAI7::PlaceType tmp = MapInfo::map[tar.x][tar.y];
@@ -1744,13 +1765,44 @@ namespace AttackMode
                 return 0;
                 break;
             case THUAI7::PlaceType::Construction:
-                return api.GetConstructionState(tar.x, tar.y).second;
+                return api.GetConstructionState(tar.x, tar.y).value().hp;
                 break;
             case THUAI7::PlaceType::Wormhole:
                 return api.GetWormholeHp(tar.x, tar.y);
                 break;
             default:
                 break;
+        }
+    }*/
+    //返回true表示这个地方的东西已经消灭了 所以应该是没血才返回true
+    bool checkState(IShipAPI& api, coordinate tar){
+        THUAI7::PlaceType temp = MapInfo::map[tar.x][tar.y];
+        if(temp == THUAI7::PlaceType::Construction){
+            auto res = api.GetConstructionState(tar.x, tar.y);
+            if(!res.has_value()){
+                return true;
+            }else{
+                auto construction = res.value();
+                if(Myside(construction.teamID)){
+                    return true;
+                }else if(construction.hp <= 0) {
+                    Commute::report(api, Instruction_RefreshConstruction, Parameter_DestroyedEnemyConstruction, tar);
+                    return true;
+                }else{
+                    return false;
+                }
+            }
+        }
+        else if(temp == THUAI7::PlaceType::Home){
+            return (MapInfo::MySide == RED) ? (api.GetGameInfo()->blueHomeHp <= 0) : (api.GetGameInfo()->redHomeHp <= 0);
+            //TODO! 基地得知对方基地被消灭之后要做什么
+        }
+        else if(temp == THUAI7::PlaceType::Wormhole){
+            return api.GetWormholeHp(tar.x, tar.y) <= 0;
+            //TODO! 虫洞被消灭之后要做什么
+        }
+        else{
+            return true;
         }
     }
 
@@ -1763,14 +1815,12 @@ namespace AttackMode
             if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, cur_target.x * 1000 + 500, cur_target.y * 1000 + 500)
                 <= WeaponToDis(ShipInfo::myself.me.weaponType) - 200)
             {
-                if (getHp(api, cur_target) == 0)
+                if (checkState(api, cur_target))
                 {
                     target.pop();
                     if (target.empty())
                     {
-                        ShipInfo::ReportBuffer.instruction = Instruction_AttackState;
-                        ShipInfo::ReportBuffer.param = Parameter_AttackSuccess;
-                        Commute::report(api);
+                        Commute::report(api, Instruction_AttackState, Parameter_AttackSuccess);
                     }
                     return false;
                 }
@@ -2112,24 +2162,19 @@ void AI::play(IShipAPI& api)
                     switch (ShipInfo::ShipBuffer.param)
                     {
                         case Parameter_ConstructionBuildUp:
-                            MapInfo::PositionLists[MapInfo::Resource].erase(ShipInfo::ShipBuffer.param_pos);
+                            MapInfo::PositionLists[MapInfo::Construction].erase(ShipInfo::ShipBuffer.param_pos);
                             break;
                         case Parameter_EnemyBuildConstruction:
-                            if (ShipInfo::myself.me.shipType==THUAI7::ShipType::MilitaryShip)
+                            if (ShipInfo::myself.me.playerID >= 3)
                             {
-                            }
-                            else if (ShipInfo::myself.me.shipType == THUAI7::ShipType::CivilianShip)
-                            {
-                            }
-                            else
-                            {
+                                AttackMode::target.push(ShipInfo::ShipBuffer.param_pos);
                             }
                             break;
-                        case Parameter_DestroyedEnemyCunstruction:
-                            MapInfo::PositionLists[MapInfo::Resource].insert(ShipInfo::ShipBuffer.param_pos);
+                        case Parameter_DestroyedEnemyConstruction:
+                            MapInfo::PositionLists[MapInfo::Construction].insert(ShipInfo::ShipBuffer.param_pos);
                             break;
                         case Parameter_DestroyedFriendConstruction:
-                            MapInfo::PositionLists[MapInfo::Resource].insert(ShipInfo::ShipBuffer.param_pos);
+                            MapInfo::PositionLists[MapInfo::Construction].insert(ShipInfo::ShipBuffer.param_pos);
                             break;
                         default:
                             break;
@@ -2218,7 +2263,7 @@ void AI::play(IShipAPI& api)
         interrupt_codeRecorder.erase(temp.id);
 	}
 
-    Commute::report(api);
+//    Commute::report(api);
     //ShipStep(api);
     /*
     if (ShipInfo::nearEnemy)
@@ -2345,7 +2390,7 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_1,PRODUCE)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(HomeInfo::first_id, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipAvailable(3)}),
-    //new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, ATTACK, MODEPARAM_AttackHome)}),
+    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, ATTACK, MODEPARAM_AttackHome)}),
 
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipAvailable(3 - HomeInfo::first_id)}),
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, CONSTRUCT, MODEPARAM_ConstructFactory)}),
