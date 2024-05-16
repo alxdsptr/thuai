@@ -1855,7 +1855,7 @@ auto WrapperFunc(std::function<BT::NodeState(IShipAPI& api)> func)
         }
     };
 }*/
-int Ship_Init = 1;
+
 /*
 void clear(IShipAPI& api)
 {
@@ -2105,7 +2105,7 @@ auto detectEnemy=[](IShipAPI& api)
 };*/
 
 
-
+int Ship_Init = 1;
 
 void AI::play(IShipAPI& api)
 {
@@ -2119,9 +2119,6 @@ void AI::play(IShipAPI& api)
     }
     if (Commute::RefreshInfo(api))
     {
-        std::cout << "Success\n"
-                  << ((ShipInfo::ShipBuffer.Mode == PRODUCE) ? "PRODUCE\n" : "NO!!!\n");
-        
         if (ShipInfo::myself.mode!=ShipInfo::ShipBuffer.Mode)
         {
             //clear(api);
@@ -2226,15 +2223,18 @@ void AI::play(IShipAPI& api)
     {
         if (i->shipState == THUAI7::ShipState::Attacking)
         {
-            api.EndAllAction();
-            double angle = i->facingDirection;
-            double move_angle = angle + PI / 2;
-            // BT::SequenceNode<IShipAPI> dodgeNode{
-            auto init_list = {new BT::eventNode<IShipAPI>{Conditions::always_ship, ShipAction::MoveFunc(move_angle, 200)}, 
-                new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), ShipAction::AttackFunc(i->x, i->y)}};
-            auto dodgeNode = std::make_shared<BT::SequenceNode<IShipAPI>>(std::move(init_list));
+
             if (interrupt_codeRecorder.find(DodgeID) == interrupt_codeRecorder.end())
             {
+                api.EndAllAction();
+                double angle = i->facingDirection;
+                double move_angle = angle + PI / 2;
+                // BT::SequenceNode<IShipAPI> dodgeNode{
+                auto init_list = {new BT::eventNode<IShipAPI>{Conditions::always_ship, ShipAction::MoveFunc(move_angle, 200)}, new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), ShipAction::AttackFunc(i->x, i->y)}};
+                auto dodgeNode = std::make_shared<BT::SequenceNode<IShipAPI>>(std::move(init_list));
+
+
+
 				interrupt_codeRecorder.insert(DodgeID);
                 int priority = 2 * RATIO + callStack.size();
 				callStack.push({[dodgeNode](IShipAPI& api)
@@ -2304,6 +2304,7 @@ bool ShipStep(IShipAPI& api)
 {
     ModeRetval res;
     res.immediate = false;
+    std::cout << "nextMode:" << nextMode << '\n';
     if (nextMode == IDLE)
     {
         res = IdleMode::Perform(api);
@@ -2311,7 +2312,8 @@ bool ShipStep(IShipAPI& api)
     }
     else if (nextMode == ATTACK)
     {
-        std::cout << "mydirect: " << ShipInfo::myself.me.facingDirection << std::endl;
+
+        std::cout << "EnterAttack, mydirect: " << ShipInfo::myself.me.facingDirection << std::endl;
         res = AttackMode::Perform(api);
         nextMode = res.mode;
     }
@@ -2348,12 +2350,7 @@ bool ShipStep(IShipAPI& api)
 }
 
 //const char* get_placetype(THUAI7::PlaceType t);
-bool hasSend = false;
-bool hasInstall = false;
-bool hasBuild = false;
-bool BuildSecondCivil = false;
 
-volatile int Ind = 2;
 
 
 
