@@ -10,7 +10,7 @@
 #include "constants.h"
 #include<algorithm>
 
-
+using std::cout, std::endl;
 #define DEBUG
 #define maxLen 55
 // 注意不要使用conio.h，Windows.h等非标准库
@@ -1133,7 +1133,7 @@ namespace Commute
             auto mes = api.GetMessage();
             std::string message = mes.second;
             Commute::ReportBuffer temp;
-            //memcpy(&temp, message.data(), REPORTBUFFER_SIZE);
+            memcpy(&temp, message.data(), REPORTBUFFER_SIZE);
             if (temp.instruction == Instruction_AttackState and temp.param == Parameter_AttackSuccess)
             {
                 HomeInfo::TeamShipBuffer[mes.first].Mode = IDLE;
@@ -1262,7 +1262,6 @@ public:
         }
         if (api.GetSelfInfo()->shipState == THUAI7::ShipState::Idle and !path.empty())
         {
-            last_location = {ShipInfo::myself.me.x, ShipInfo::myself.me.y};
             std::vector<std::pair<coordinate, MapInfo::Place>> temp;
             auto saveAndChange = [&temp](int x, int y)
             {
@@ -1305,16 +1304,26 @@ public:
 			}
             if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, last_location.x, last_location.y) < 100)
             {
+                last_location = {ShipInfo::myself.me.x, ShipInfo::myself.me.y};
+                std::cout << "move backward" << std::endl;
+                for (const auto& i : temp)
+                {
+                    MapInfo::fullmap[i.first.x][i.first.y] = i.second;
+                }
                 api.Move(300, last_angle + PI);
                 return false;
 			}
             else if (!temp.empty() or euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, path.front().x * 1000 + 500, path.front().y * 1000 + 500) > 1500)
             {
                 path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target.x, target.y);
-            }
-            for (const auto& i : temp)
-            {
-                MapInfo::fullmap[i.first.x][i.first.y] = i.second;
+                for (const auto& i : temp)
+                {
+                    MapInfo::fullmap[i.first.x][i.first.y] = i.second;
+                }
+                if (path.empty())
+                {
+                    return false;
+                }
             }
 
             auto next = path.front();
@@ -1328,8 +1337,9 @@ public:
             std::cout << "dx: " << dx << " dy: " << dy << std::endl;
             std::cout << "time: " << time << " angle: " << angle << std::endl;
             #endif
-            auto res = api.Move((int)time, angle);
             last_angle = angle;
+            last_location = {ShipInfo::myself.me.x, ShipInfo::myself.me.y};
+            auto res = api.Move((int)time, angle);
             if (!res.get())
             {
                 std::cout << "move fail"; 
@@ -1840,7 +1850,7 @@ namespace AttackMode
                 auto end_condition = [cur_target](IShipAPI& api)
                 {
                     return (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, cur_target.x * 1000 + 500, cur_target.y * 1000 + 500)
-                        <= WeaponToDis(ShipInfo::myself.me.weaponType) and api.HaveView(cur_target.y * 1000 + 500, cur_target.y * 1000 + 500));
+                        <= WeaponToDis(ShipInfo::myself.me.weaponType) and api.HaveView(cur_target.x * 1000 + 500, cur_target.y * 1000 + 500));
                 };
                 auto search = std::make_shared<RoadSearch>(cur_target, end_condition);
                 int priority = 1 * RATIO + callStack.size();
