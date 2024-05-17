@@ -2376,11 +2376,13 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
             std::future<bool> res;
             if (i <= 2)
             {
-                res = api.BuildShip(THUAI7::ShipType::CivilianShip, 0);
+                if (api.GetEnergy() >= 4000)
+                    res = api.BuildShip(THUAI7::ShipType::CivilianShip, 0);
             }
             else
             {
-                res = api.BuildShip(THUAI7::ShipType::MilitaryShip, 0);
+                if (api.GetEnergy() >= 12000)
+                    res = api.BuildShip(THUAI7::ShipType::MilitaryShip, 0);
             }
             if (res.get())
             {
@@ -2404,7 +2406,7 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipAvailable(3 - HomeInfo::first_id)}),
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, CONSTRUCT, MODEPARAM_ConstructFactory)}),
 
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(3 - HomeInfo::first_id, THUAI7::ModuleType::ModuleConstructor3), Conditions::ShipHasConstructor(2, THUAI7::ConstructorType::Constructor3)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(3 - HomeInfo::first_id, THUAI7::ModuleType::ModuleConstructor3), Conditions::ShipHasConstructor(3 - HomeInfo::first_id, THUAI7::ConstructorType::Constructor3)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipAvailable(4)}),
     //new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_4, ATTACK, MODEPARAM_AttackHome)}),
 
