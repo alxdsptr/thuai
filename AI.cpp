@@ -1536,9 +1536,11 @@ namespace IdleMode
                     if (ShipInfo::myself.me.shipState != THUAI7::ShipState::Attacking and ShipInfo::myself.me.shipState != THUAI7::ShipState::Swinging)
                     {
                         api.Attack(atan2(target.y * 1000 + 500 - ShipInfo::myself.me.y, target.x * 1000 + 500 - ShipInfo::myself.me.x));
+                        #ifdef DEBUG
                         cout << "dy: " << target.y * 1000 + 500 - ShipInfo::myself.me.y;
                         cout << " dx: " << target.x * 1000 + 500 - ShipInfo::myself.me.x << endl;
                         cout << "attack angle: ";
+                        #endif
                         std::cout << atan2(target.y * 1000 + 500 - ShipInfo::myself.me.y, target.x * 1000 + 500 - ShipInfo::myself.me.x) << std::endl;
                     }
                     return false;
@@ -2189,25 +2191,28 @@ void AI::play(IShipAPI& api)
     for (auto const& i : ShipInfo::Enemies)
     {
         double dis = euclidean_distance(i->x, i->y, ShipInfo::myself.me.x, ShipInfo::myself.me.y);
-        if (dis >= WeaponToDis(i->weaponType) + 500)
+        if (dis >= 8000)
         {
             continue;
         }
         if (i->shipState == THUAI7::ShipState::Attacking)
         {
-            if(ShipInfo::myself.me.weaponType == THUAI7::WeaponType::NullWeaponType
-            and interrupt_codeRecorder.find(ReturnHomeID) == interrupt_codeRecorder.end())
+            if(ShipInfo::myself.me.weaponType == THUAI7::WeaponType::NullWeaponType)
             {
-                double angle = i->facingDirection;
-                double move_angle = angle + PI / 2;
-                api.EndAllAction();
-                api.Move(300, move_angle);
-                coordinate target = *MapInfo::PositionLists[MapInfo::MyHome].begin();
-                auto end_condition = [](IShipAPI&){return false;};
-                auto search = std::make_shared<RoadSearch>(target, end_condition);
-                int prior = 3 * RATIO + callStack.size();
-                callStack.push({*search, ReturnHomeID, prior});
-                interrupt_codeRecorder.insert(ReturnHomeID);
+                if (interrupt_codeRecorder.find(ReturnHomeID) == interrupt_codeRecorder.end())
+                {
+                    double angle = i->facingDirection;
+                    double move_angle = angle + PI / 2;
+                    api.EndAllAction();
+                    api.Move(300, move_angle);
+                    coordinate target = *MapInfo::PositionLists[MapInfo::MyHome].begin();
+                    auto end_condition = [](IShipAPI&)
+                    { return false; };
+                    auto search = std::make_shared<RoadSearch>(target, end_condition);
+                    int prior = 3 * RATIO + callStack.size();
+                    callStack.push({*search, ReturnHomeID, prior});
+                    interrupt_codeRecorder.insert(ReturnHomeID);
+                }
                 return;
             }
             if (interrupt_codeRecorder.find(DodgeID) == interrupt_codeRecorder.end())
@@ -2226,20 +2231,23 @@ void AI::play(IShipAPI& api)
 			}
             break;
         }
-        else if (i->weaponType == THUAI7::WeaponType::NullWeaponType and ShipInfo::myself.me.weaponType != THUAI7::WeaponType::NullWeaponType)
+        if (ShipInfo::myself.me.weaponType != THUAI7::WeaponType::NullWeaponType)
         {
-            auto &state = ShipInfo::myself.me.shipState;
-            if(state != THUAI7::ShipState::Attacking and state != THUAI7::ShipState::Swinging)
+            if (i->weaponType == THUAI7::WeaponType::NullWeaponType or i->shipState == THUAI7::ShipState::Stunned)
             {
-                double dis = euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, i->x, i->y);
-                if(dis < WeaponToDis(ShipInfo::myself.me.weaponType))
+                auto& state = ShipInfo::myself.me.shipState;
+                if (state != THUAI7::ShipState::Attacking and state != THUAI7::ShipState::Swinging)
                 {
-                    api.EndAllAction();
-                    api.Attack(atan2(i->y - ShipInfo::myself.me.y, i->x - ShipInfo::myself.me.x));
+                    double dis = euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, i->x, i->y);
+                    if (dis < WeaponToDis(ShipInfo::myself.me.weaponType))
+                    {
+                        api.EndAllAction();
+                        api.Attack(atan2(i->y - ShipInfo::myself.me.y, i->x - ShipInfo::myself.me.x));
+                    }
                 }
             }
-        }
 
+        }
     }
 
     /*
@@ -2257,10 +2265,11 @@ void AI::play(IShipAPI& api)
     }*/
     std::cout << ShipInfo::myself.mode << "  "<<nextMode << std::endl;
     auto temp = callStack.top();
-    if (temp.func(api))
+    while (temp.func(api))
     {
 		callStack.pop();
         interrupt_codeRecorder.erase(temp.id);
+        temp = callStack.top();
 	}
 
 //    Commute::report(api);
