@@ -1512,14 +1512,6 @@ namespace IdleMode
     {
         if (ShipInfo::myself.me.playerID>=3)
         {
-            if (target.x == -1)
-            {
-                if (InspectionList.empty())
-                {
-                    InspectionList = MapInfo::Ori_PositionLists[MapInfo::Place::Construction];
-                }
-                LoadNearestPosition(api);
-            }
             if (near_enough(api))
             {
                 auto construction_stat = api.GetConstructionState(target.x, target.y);
@@ -1544,6 +1536,9 @@ namespace IdleMode
                     if (ShipInfo::myself.me.shipState != THUAI7::ShipState::Attacking and ShipInfo::myself.me.shipState != THUAI7::ShipState::Swinging)
                     {
                         api.Attack(atan2(target.y * 1000 + 500 - ShipInfo::myself.me.y, target.x * 1000 + 500 - ShipInfo::myself.me.x));
+                        cout << "dy: " << target.y * 1000 + 500 - ShipInfo::myself.me.y;
+                        cout << " dx: " << target.x * 1000 + 500 - ShipInfo::myself.me.x << endl;
+                        cout << "attack angle: ";
                         std::cout << atan2(target.y * 1000 + 500 - ShipInfo::myself.me.y, target.x * 1000 + 500 - ShipInfo::myself.me.x) << std::endl;
                     }
                     return false;
@@ -1559,6 +1554,11 @@ namespace IdleMode
             }
             else
             {
+                if (InspectionList.empty())
+                {
+                    InspectionList = MapInfo::Ori_PositionLists[MapInfo::Place::Construction];
+                }
+                LoadNearestPosition(api);
                 auto search = std::make_shared<RoadSearch>(target, near_enough);
                 int priority = 1.5 * RATIO + callStack.size();
                 callStack.push({*search, RoadSearchID, priority});
@@ -1610,11 +1610,6 @@ namespace ConstructMode
         {
             return false;
         }
-        if (target.x==-1)
-        {
-            if (!GetNearestConstruction(api))
-                return false;
-        }
         if (near_enough(api))
         {
             std::cout << "near enough" << std::endl;
@@ -1658,6 +1653,8 @@ namespace ConstructMode
         }
         else
         {
+            if (!GetNearestConstruction(api))
+                return false;
             auto search = std::make_shared<RoadSearch>(target, near_enough);
             int priority = 1 * RATIO + callStack.size();
             callStack.push({*search, RoadSearchID, priority});
@@ -1702,13 +1699,6 @@ namespace ProduceMode
         {
 			return false;
 		}
-        if (target.x == -1)
-        {
-            if (!GetNearestResource(api))
-            {
-                return false;
-            }
-        }
         if (near_enough(api))
         {
             if (api.GetResourceState(target.x, target.y)>0)
@@ -1729,6 +1719,10 @@ namespace ProduceMode
         }
         else
         {
+            if (!GetNearestResource(api))
+            {
+                return false;
+            }
             auto search = std::make_shared<RoadSearch>(target, near_enough);
             int priority = 1 * RATIO + callStack.size();
             callStack.push({*search, RoadSearchID, priority});
@@ -2104,6 +2098,7 @@ void AI::play(IShipAPI& api)
         if (ShipInfo::myself.mode!=ShipInfo::ShipBuffer.Mode)
         {
             //clear(api);
+            nextMode = ShipInfo::myself.mode = ShipInfo::ShipBuffer.Mode;
             switch (ShipInfo::ShipBuffer.Mode)
             {
                 case PRODUCE:
@@ -2112,7 +2107,6 @@ void AI::play(IShipAPI& api)
                         ProduceMode::target = ShipInfo::ShipBuffer.target;
                         
                     }
-                    nextMode = ShipInfo::myself.mode = PRODUCE;
                     break;
                 case CONSTRUCT:
                     nextMode = ShipInfo::myself.mode = CONSTRUCT;
@@ -2120,7 +2114,6 @@ void AI::play(IShipAPI& api)
                     {
                         ConstructMode::target = ShipInfo::ShipBuffer.target;
                     }
-                    nextMode=ShipInfo::myself.mode = CONSTRUCT;
                     switch (ShipInfo::ShipBuffer.ModeParam)
                     {
                         case MODEPARAM_ConstructFactory:
@@ -2135,10 +2128,8 @@ void AI::play(IShipAPI& api)
                         default:
                             break;
                     }
-
                     break;
                 case ATTACK:
-                    nextMode = ShipInfo::myself.mode = ATTACK;
                     switch (ShipInfo::ShipBuffer.ModeParam)
                     {
                         case MODEPARAM_AttackHome:
@@ -2148,7 +2139,6 @@ void AI::play(IShipAPI& api)
                             AttackMode::target.push(ShipInfo::ShipBuffer.target);
                             break;
                     }
-                    
                     break;
                 default:
                     break;
