@@ -2195,9 +2195,29 @@ void AI::play(IShipAPI& api)
         {
             continue;
         }
-        if (i->shipState == THUAI7::ShipState::Attacking)
+        if (i->weaponType == THUAI7::WeaponType::NullWeaponType)
         {
-            if(ShipInfo::myself.me.weaponType == THUAI7::WeaponType::NullWeaponType)
+            if (ShipInfo::myself.me.weaponType != THUAI7::WeaponType::NullWeaponType)
+            {
+                auto& state = ShipInfo::myself.me.shipState;
+                if (state != THUAI7::ShipState::Attacking and state != THUAI7::ShipState::Swinging)
+                {
+                    double dis = euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, i->x, i->y);
+                    if (dis < WeaponToDis(ShipInfo::myself.me.weaponType))
+                    {
+                        api.EndAllAction();
+                        api.Attack(atan2(i->y - ShipInfo::myself.me.y, i->x - ShipInfo::myself.me.x));
+                    }
+                }
+            }
+            else
+            {
+                //TODO! 遇到无武装敌舰报告基地
+            }
+        }
+        else
+        {
+            if (ShipInfo::myself.me.weaponType == THUAI7::WeaponType::NullWeaponType)
             {
                 if (interrupt_codeRecorder.find(ReturnHomeID) == interrupt_codeRecorder.end())
                 {
@@ -2215,36 +2235,39 @@ void AI::play(IShipAPI& api)
                 }
                 return;
             }
-            if (interrupt_codeRecorder.find(DodgeID) == interrupt_codeRecorder.end())
+            else
             {
                 api.EndAllAction();
-                double angle = i->facingDirection;
-                double move_angle = angle + PI / 2;
-                // BT::SequenceNode<IShipAPI> dodgeNode{
-                auto init_list = {new BT::eventNode<IShipAPI>{Conditions::always_ship, ShipAction::MoveFunc(move_angle, 200)},
-                                  new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), ShipAction::AttackFunc(i->x, i->y)}};
-                auto dodgeNode = std::make_shared<BT::SequenceNode<IShipAPI>>(std::move(init_list));
-				interrupt_codeRecorder.insert(DodgeID);
-                int priority = 2 * RATIO + callStack.size();
-				callStack.push({[dodgeNode](IShipAPI& api)
-                { return dodgeNode->perform(api) == BT::SUCCESS; }, DodgeID, priority});
-			}
-            break;
-        }
-        if (ShipInfo::myself.me.weaponType != THUAI7::WeaponType::NullWeaponType)
-        {
-            if (i->weaponType == THUAI7::WeaponType::NullWeaponType or i->shipState == THUAI7::ShipState::Stunned)
-            {
-                auto& state = ShipInfo::myself.me.shipState;
-                if (state != THUAI7::ShipState::Attacking and state != THUAI7::ShipState::Swinging)
+                if (i->shipState == THUAI7::ShipState::Attacking)
+                {
+                    if (interrupt_codeRecorder.find(DodgeID) == interrupt_codeRecorder.end())
+                    {
+                        double angle = i->facingDirection;
+                        double move_angle = angle + PI / 2;
+                        // BT::SequenceNode<IShipAPI> dodgeNode{
+                        auto init_list = {new BT::eventNode<IShipAPI>{Conditions::always_ship, ShipAction::MoveFunc(move_angle, 200)}, new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), ShipAction::AttackFunc(i->x, i->y)}};
+                        auto dodgeNode = std::make_shared<BT::SequenceNode<IShipAPI>>(std::move(init_list));
+                        interrupt_codeRecorder.insert(DodgeID);
+                        int priority = 2 * RATIO + callStack.size();
+                        callStack.push({[dodgeNode](IShipAPI& api)
+                                        { return dodgeNode->perform(api) == BT::SUCCESS; },
+                                        DodgeID,
+                                        priority});
+                    }
+                    break;
+                }
+                else if (i->shipState == THUAI7::ShipState::Stunned)
                 {
                     double dis = euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, i->x, i->y);
                     if (dis < WeaponToDis(ShipInfo::myself.me.weaponType))
                     {
-                        api.EndAllAction();
                         api.Attack(atan2(i->y - ShipInfo::myself.me.y, i->x - ShipInfo::myself.me.x));
                     }
                 }
+                else
+                {
+                }
+
             }
 
         }
@@ -2373,18 +2396,18 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
         for (auto iter = HomeInfo::reviveList.begin(); iter != HomeInfo::reviveList.end(); iter++)
         {
             int i = *iter;
-            std::future<bool> res;
+            bool res = false;
             if (i <= 2)
             {
                 if (api.GetEnergy() >= 4000)
-                    res = api.BuildShip(THUAI7::ShipType::CivilianShip, 0);
+                    res = api.BuildShip(THUAI7::ShipType::CivilianShip, 0).get();
             }
             else
             {
                 if (api.GetEnergy() >= 12000)
-                    res = api.BuildShip(THUAI7::ShipType::MilitaryShip, 0);
+                    res = api.BuildShip(THUAI7::ShipType::MilitaryShip, 0).get();
             }
-            if (res.get())
+            if (res)
             {
                 iter = HomeInfo::reviveList.erase(iter);
                 if(iter == HomeInfo::reviveList.end())
