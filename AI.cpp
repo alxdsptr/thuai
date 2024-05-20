@@ -2080,6 +2080,8 @@ auto detectEnemy=[](IShipAPI& api)
 
 int Ship_Init = 1;
 
+int Confrontation_Time_Count = -1;
+
 void AI::play(IShipAPI& api)
 {
     ShipInfo::CheckInfo(api);
@@ -2247,11 +2249,12 @@ void AI::play(IShipAPI& api)
             }
             else
             {
-                api.EndAllAction();
+                //api.EndAllAction();
                 if (i->shipState == THUAI7::ShipState::Attacking)
                 {
-                    if (interrupt_codeRecorder.find(DodgeID) == interrupt_codeRecorder.end())
+                    if (interrupt_codeRecorder.find(DodgeID) == interrupt_codeRecorder.end() && interrupt_codeRecorder.find(RecoveryID) == interrupt_codeRecorder.end())
                     {
+                        api.EndAllAction();
                         double angle = i->facingDirection;
                         double move_angle = angle + PI / 2;
                         // BT::SequenceNode<IShipAPI> dodgeNode{
