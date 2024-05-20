@@ -55,6 +55,7 @@ extern const bool asynchronous = false;
 #define DodgeID 1
 #define RoadSearchID 2
 #define ReturnHomeID 3
+#define RecoveryID 4
 #define RATIO 1000
 
 // 选手需要依次将player1到player4的船类型在这里定义
@@ -334,6 +335,8 @@ namespace ShipInfo
     * @param TargetPos coordinate
     */
     ShipMem myself;
+
+
 
     /**
     * @brief 敌舰
@@ -1866,14 +1869,7 @@ ShipMode nextMode=IDLE;
 
 bool ShipStep(IShipAPI &api);
 
-/*
-void clear(IShipAPI& api)
-{
-    for (auto const& clear : clear_list)
-    {
-       clear(api);
-    }
-}*/
+
 
 /**
  * @brief 检测我方是否在对方射程内
@@ -1894,41 +1890,8 @@ inline bool In_ShootingDistance(int x, int y, int weapondistance)
     }
 }
 
-/**
- * @brief 判断伤害大小
- * @param weapon 武器类型
- * @param towhich 0表示本体，1表示装甲，2表示护盾
- * @return 
- */
-/*
-inline int WeaponToDamage(THUAI7::WeaponType weapon, unsigned char towhich)
-{
-    int damage=0, mag=0;
-    switch (weapon)
-    {
-        case THUAI7::WeaponType::NullWeaponType:
-            damage = 0, mag = 0;
-            break;
-        case THUAI7::WeaponType::LaserGun:
-            damage = 1200, mag = (towhich == 0) ? 1 : (towhich == 1 ? 1.5 : 0.6);
-            break;
-        case THUAI7::WeaponType::PlasmaGun:
-            damage = 1300, mag = (towhich == 0) ? 1 : (towhich == 1 ? 2 : 0.4);
-            break;
-        case THUAI7::WeaponType::ShellGun:
-            damage = 1800, mag = (towhich == 0) ? 1 : (towhich == 1 ? 0.4 : 1.5);
-            break;
-        case THUAI7::WeaponType::MissileGun:
-            damage = 1600, mag = (towhich == 0) ? 1 : (towhich == 1 ? 1 : 1000);
-            break;
-        case THUAI7::WeaponType::ArcGun:
-            damage = 3200, mag = (towhich == 0) ? 1 : (towhich == 1 ? 2 : 2);
-            break;
-        default:
-            break;
-    }
-    return damage * mag;
-}*/
+
+
 
 double WeaponHarm[6][3] = {
     {1200, 1.5, 0.6},
@@ -2046,7 +2009,39 @@ inline unsigned char Conquerable(THUAI7::Ship & enemy)
 
 }
 
+auto MyRecovery = [] (IShipAPI & api)
+{
+    int fullHp = ((ShipInfo::myself.me.shipType == THUAI7::ShipType::CivilianShip) ? (3000) : ((ShipInfo::myself.me.shipType == THUAI7::ShipType::MilitaryShip) ? 4000 : 12000));
+    if (ShipInfo::myself.me.hp == fullHp)
+    {
+        return true;//血量回满则退出
+    }
+    else
+    {
+        if (ShipInfo::myself.me.shipState==THUAI7::ShipState::Recovering)
+        {
+            return false;//正在回血则继续
+        }
+        else
+        {
+            if (euclidean_distance({ShipInfo::myself.me.x/1000, ShipInfo::myself.me.y/1000}, MapInfo::MyHome)<=1)
+            {
+                api.Recover(fullHp-ShipInfo::myself.me.hp);
+                return false;
+            }
+            else
+            {
+                //没到家就寻路
+                auto search = std::make_shared<RoadSearch>(*MapInfo::PositionLists[MapInfo::MyHome].begin(), [](IShipAPI& api)
+                                                           { return false; });
+                int priority = 4 * RATIO + callStack.size();
+                callStack.push({*search, RoadSearchID, priority});
 
+                return false;
+            }
+        }
+    }
+};
 
 
 /**
@@ -2188,6 +2183,21 @@ void AI::play(IShipAPI& api)
         }
     }
 
+    
+    /**
+    * @brief 血量过低则回城
+    */
+    if (ShipInfo::myself.me.hp < 2000 && interrupt_codeRecorder.find(DodgeID) != interrupt_codeRecorder.end())
+    {
+        if (interrupt_codeRecorder.find(RecoveryID)==interrupt_codeRecorder.end())
+        {
+            interrupt_codeRecorder.insert(RecoveryID);
+            int pri = 4 * RATIO + callStack.size();
+            callStack.push({MyRecovery, RecoveryID, pri});
+        }
+    }
+
+
     for (auto const& i : ShipInfo::Enemies)
     {
         double dis = euclidean_distance(i->x, i->y, ShipInfo::myself.me.x, ShipInfo::myself.me.y);
@@ -2286,7 +2296,6 @@ void AI::play(IShipAPI& api)
             }
         }
     }*/
-    std::cout << ShipInfo::myself.mode << "  "<<nextMode << std::endl;
     auto temp = callStack.top();
     while (temp.func(api))
     {
