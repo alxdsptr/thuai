@@ -93,6 +93,18 @@ struct coordinate
         y(y)
     {
     }
+
+    bool operator!=(coordinate& co)
+    {
+        if (x==co.x&&y==co.y)
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
 };
 struct PointHash
 {
@@ -427,6 +439,8 @@ namespace ShipInfo
     }
 
 }
+
+
 /**
  * @brief 判断自己是否在某类型格子附近
  * @param x x坐标，注意不是格子数
@@ -465,6 +479,151 @@ double WeaponToDis(THUAI7::WeaponType p)
 {
     return WeaponDis[(int)p];
 }
+
+/**
+ * @brief 加入了判断有无遮挡物功能的攻击函数（注意，不保证一定在射程内，仅检测到目标的途中有无障碍）
+ * @param api 
+ * @param angle 攻击的角度
+ * @param target 攻击的目标（格子数）
+ * @return (-1,-1)表示正常运行；(-2,-2)表示找不到路径；若不是，则返回的是最近的可以攻击到目标的坐标
+ */
+coordinate MyAttack(IShipAPI& api, double angle, coordinate target)
+{
+    double x = ShipInfo::myself.me.x;
+    double y = ShipInfo::myself.me.y;
+
+    coordinate tar(target.x * 1000 + 500, target.y * 1000 + 500);
+
+    double fulldistance = euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, tar.x,tar.y);
+
+    /**
+    * @brief
+    * y
+    * ↑
+    * ②--④
+    * |  |
+    * ①--③ →x
+    */
+    coordinate Gridpoint[4];
+
+    auto judge_ok = [&]() {
+        bool ok = true;
+        for (double i = 400; i < fulldistance && ok; i += 400)
+        {
+            double x1 = x + cos(angle) * i;
+            double y1 = y + sin(angle) * i;
+
+            coordinate tmp(((int)x1) / 1000, ((int)y1) / 1000);  // 格子数的坐标
+            THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
+            if (tmp==target)
+            {
+                break;
+            }
+            if (tmp != target && (tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
+            {
+                ok = false;
+            }
+
+            if (ok)
+            {
+                int cnt = 0;
+                // 储存四个格点的坐标
+                for (int j = 0; j < 2; j++)
+                {
+                    for (int k = 0; k < 2; k++)
+                    {
+                        Gridpoint[cnt] = {(int)x1 / 1000 * 1000 + 1000 * j, (int)y1 / 1000 * 1000 + 1000 * k};
+                        cnt++;
+                    }
+                }
+
+                // 判断格点
+                for (int i = 0; i < 4 && ok; i++)
+                {
+                    if (euclidean_distance(Gridpoint[i].x, Gridpoint[i].y, x1, y1) < 200)
+                    {
+                        // 判断四个格子
+                        for (int j = 0; j < 2 && ok; j++)
+                        {
+                            for (int k = 0; k < 2 && ok; k++)
+                            {
+                                coordinate tmp((((int)Gridpoint[i].x) - 500 + 1000 * j) / 1000, (((int)Gridpoint[i].y) - 500 + 1000 * k) / 1000);  // 格子数的坐标
+                                THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
+                                if (tmp != target && (tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
+                                {
+                                    ok = false;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (ok)
+                {
+                    // 判断四个格子线
+                    if (x1 - ((int)x1) / 1000 * 1000 < 200)
+                    {
+                        coordinate tmp(x1 - 1000, y1);
+                        THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
+                        if (tmp != target && (tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
+                        {
+                            ok = false;
+                        }
+                    }
+                    else if (((int)x1) / 1000 * 1000 + 1000 - x1 < 200)
+                    {
+                        coordinate tmp(x1 + 1000, y1);
+                        THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
+                        if (tmp != target && (tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
+                        {
+                            ok = false;
+                        }
+                    }
+
+                    if (ok && y1 - ((int)y1) / 1000 * 1000 < 200)
+                    {
+                        coordinate tmp(x1, y1 - 1000);
+                        THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
+                        if (tmp != target && (tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
+                        {
+                            ok = false;
+                        }
+                    }
+                    else if (ok && ((int)y1) / 1000 * 1000 + 1000 - y1 < 200)
+                    {
+                        coordinate tmp(x1, y1 + 1000);
+                        THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
+                        if (tmp != target && (tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
+                        {
+                            ok = false;
+                        }
+                    }
+                }
+            }
+        }
+        return ok;
+    };
+
+    if (judge_ok())
+    {
+        api.Attack(angle);
+        return {-1, -1};
+    }
+    double tmp_ang = angle;
+    for (angle=tmp_ang-PI/2; angle <tmp_ang+PI/2 ; angle+=PI/16)
+    {
+        if (judge_ok())
+        {
+            return {(int)(tar.x - cos(angle) * fulldistance), (int)(tar.y - sin(angle) * fulldistance)};
+        }
+    }
+
+    return {-2, -2};
+
+
+
+}
+
 
 
 
@@ -1746,44 +1905,16 @@ namespace AttackMode
 {
     std::queue<coordinate> target;
 
-    /*
-    int getHp(IShipAPI& api,coordinate tar)
-    {
-        THUAI7::PlaceType tmp = MapInfo::map[tar.x][tar.y];
-        switch (tmp)
-        {
-            case THUAI7::PlaceType::NullPlaceType:
-                return 0;
-                break;
-            case THUAI7::PlaceType::Home:
-                return (MapInfo::MySide == RED) ? (api.GetGameInfo()->blueHomeHp) : (api.GetGameInfo()->redHomeHp);
-                break;
-            case THUAI7::PlaceType::Space:
-                return 0;
-                break;
-            case THUAI7::PlaceType::Ruin:
-                return 0;
-                break;
-            case THUAI7::PlaceType::Shadow:
-                return 0;
-                break;
-            case THUAI7::PlaceType::Asteroid:
-                return 0;
-                break;
-            case THUAI7::PlaceType::Resource:
-                return 0;
-                break;
-            case THUAI7::PlaceType::Construction:
-                return api.GetConstructionState(tar.x, tar.y).value().hp;
-                break;
-            case THUAI7::PlaceType::Wormhole:
-                return api.GetWormholeHp(tar.x, tar.y);
-                break;
-            default:
-                break;
-        }
-    }*/
     //返回true表示这个地方的东西已经消灭了 所以应该是没血才返回true
+    
+
+
+    /**
+     * @brief 检查目标是否被摧毁
+     * @param api 
+     * @param tar 目标所在格子数
+     * @return true: 已成功消灭；false: 未消灭
+     */
     bool checkState(IShipAPI& api, coordinate tar){
         THUAI7::PlaceType temp = MapInfo::map[tar.x][tar.y];
         if(temp == THUAI7::PlaceType::Construction){
