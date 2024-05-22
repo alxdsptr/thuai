@@ -126,6 +126,7 @@ struct node
 
 // bool visited[maxLen][maxLen];
 // coordinate from[maxLen][maxLen];
+coordinate tmp_location_for_test(32, 10);
 
 enum ShipMode
 {
@@ -487,7 +488,7 @@ double WeaponToDis(THUAI7::WeaponType p)
  * @param target 攻击的目标（格子数）
  * @return (-1,-1)表示正常运行；(-2,-2)表示找不到路径；若不是，则返回的是最近的可以攻击到目标的坐标
  */
-coordinate MyAttack(IShipAPI& api, double angle, coordinate target)
+inline coordinate MyAttack(IShipAPI& api, double angle, coordinate target)
 {
     double x = ShipInfo::myself.me.x;
     double y = ShipInfo::myself.me.y;
@@ -1634,7 +1635,7 @@ inline bool Myside(int i)
 }
 inline bool ConstructionFullHp(int curHp, THUAI7::ConstructionType a)
 {
-    return (curHp >= ((a == THUAI7::ConstructionType::Factory) ? 8000 : ((a == THUAI7::ConstructionType::Fort) ? 12000 : 6000)));
+    return (curHp >= ((a == THUAI7::ConstructionType::Factory) ? 12000 : ((a == THUAI7::ConstructionType::Fort) ? 16000 : 10000)));
 }
 
 namespace IdleMode
@@ -1942,7 +1943,7 @@ namespace AttackMode
             //TODO! 虫洞被消灭之后要做什么
         }
         else{
-            return true;
+            return false;
         }
     }
 
@@ -1973,7 +1974,22 @@ namespace AttackMode
                 // double angle = -0.3;
                 std::cout << "mydirect: " << ShipInfo::myself.me.facingDirection << std::endl;
                 std::cout << "angle: " << angle << std::endl;
-                api.Attack(angle);
+                //api.Attack(angle);
+                coordinate tmp=MyAttack(api, angle, target.front());
+                if (tmp.x<0)
+                {
+                    std::cout << "NOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO!!!!\n";
+                }
+                else
+                {
+                    auto end_condition = [](IShipAPI& api)
+                    {
+                        return false;
+                    };
+                    auto search = std::make_shared<RoadSearch>(tmp, end_condition);
+                    int priority = 1 * RATIO + callStack.size();
+                    callStack.push({*search, RoadSearchID, priority});
+                }
             }
             else
             {
@@ -2218,6 +2234,16 @@ void AI::play(IShipAPI& api)
     ShipInfo::CheckInfo(api);
     if (Ship_Init)
     {
+        //if (api.GetSelfInfo()->playerID>2)
+        //{
+        //    nextMode = ATTACK;
+        //    coordinate tmmmmp(26, 9);
+        //    AttackMode::target.push(tmmmmp);
+        //}
+        //else
+        //{
+        //    nextMode = PRODUCE;
+        //}
         nextMode = IDLE;
         callStack.push({&ShipStep, ShipStepID, 0});
         interrupt_codeRecorder.insert(0);
@@ -2266,7 +2292,7 @@ void AI::play(IShipAPI& api)
                             AttackMode::target.push(*(MapInfo::PositionLists[MapInfo::EnemyHome].begin()));
                             break;
                         default:
-                            AttackMode::target.push(ShipInfo::ShipBuffer.target);
+                            AttackMode::target.push({32,10});
                             break;
                     }
                     break;
@@ -2519,6 +2545,8 @@ bool run = true;
 bool init_root = false;
 BT::SequenceNode<ITeamAPI> root;
 
+
+
 void AI::play(ITeamAPI& api)  // 默认team playerID 为0
 {
 
@@ -2567,7 +2595,7 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_1,PRODUCE)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(HomeInfo::first_id, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipAvailable(3)}),
-    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, ATTACK, MODEPARAM_AttackHome)}),
+            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, ATTACK, MODEPARAM_AttackHome)}),
 
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipAvailable(3 - HomeInfo::first_id)}),
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, CONSTRUCT, MODEPARAM_ConstructFactory)}),
