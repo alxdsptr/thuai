@@ -2158,30 +2158,38 @@ inline unsigned char Conquerable(THUAI7::Ship & enemy)
 
 auto MyRecovery = [] (IShipAPI & api)
 {
+    //std::cout << "Enter RecoveryMode\n";
     int fullHp = ((ShipInfo::myself.me.shipType == THUAI7::ShipType::CivilianShip) ? (3000) : ((ShipInfo::myself.me.shipType == THUAI7::ShipType::MilitaryShip) ? 4000 : 12000));
     if (ShipInfo::myself.me.hp == fullHp)
     {
         return true;//血量回满则退出
+        //std::cout << "RecoveryMode：Full\n";
     }
     else
     {
         if (ShipInfo::myself.me.shipState==THUAI7::ShipState::Recovering)
         {
+            //std::cout << "RecoveryMode：Continue\n";
+
             return false;//正在回血则继续
         }
         else
         {
-            if (euclidean_distance({ShipInfo::myself.me.x/1000, ShipInfo::myself.me.y/1000}, MapInfo::MyHome)<=1)
+            if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, *MapInfo::PositionLists[MapInfo::MyHome].begin()) <= 1)
             {
                 api.Recover(fullHp-ShipInfo::myself.me.hp);
+                //std::cout << "Recover Called, status:" << (reply.get() ? "success\n" : "fail\n");
+
                 return false;
             }
             else
             {
+                //std::cout << "RecoveryMode：RoadSearch\n";
+
                 //没到家就寻路
                 auto search = std::make_shared<RoadSearch>(*MapInfo::PositionLists[MapInfo::MyHome].begin(), [](IShipAPI& api)
-                                                           { return false; });
-                int priority = 4 * RATIO + callStack.size();
+                                                           { return (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, (*MapInfo::PositionLists[MapInfo::MyHome].begin()).x, (*MapInfo::PositionLists[MapInfo::MyHome].begin()).y) <= 1); });
+                int priority = 5 * RATIO + callStack.size();
                 callStack.push({*search, RoadSearchID, priority});
 
                 return false;
@@ -2346,7 +2354,7 @@ void AI::play(IShipAPI& api)
     /**
     * @brief 血量过低则回城
     */
-    if (ShipInfo::myself.me.hp < 2000 && interrupt_codeRecorder.find(DodgeID) != interrupt_codeRecorder.end())
+    if (ShipInfo::myself.me.hp < 2000)
     {
         if (interrupt_codeRecorder.find(RecoveryID)==interrupt_codeRecorder.end())
         {
