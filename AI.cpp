@@ -126,7 +126,7 @@ struct node
 
 // bool visited[maxLen][maxLen];
 // coordinate from[maxLen][maxLen];
-coordinate tmp_location_for_test(32, 10);
+
 
 enum ShipMode
 {
