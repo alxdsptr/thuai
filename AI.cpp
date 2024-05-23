@@ -585,7 +585,7 @@ inline coordinate MyAttack(IShipAPI& api, double angle, coordinate target)
                     // 判断四个格子线
                     if (x1 - ((int)x1) / 1000 * 1000 < 200)
                     {
-                        coordinate tmp(x1 - 1000, y1);
+                        coordinate tmp((x1 - 1000)/1000, y1/1000);
                         THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
                         if (tmp != target && (tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
                         {
@@ -594,7 +594,7 @@ inline coordinate MyAttack(IShipAPI& api, double angle, coordinate target)
                     }
                     else if (((int)x1) / 1000 * 1000 + 1000 - x1 < 200)
                     {
-                        coordinate tmp(x1 + 1000, y1);
+                        coordinate tmp((x1 + 1000)/1000, y1/1000);
                         THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
                         if (tmp != target && (tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
                         {
@@ -604,7 +604,7 @@ inline coordinate MyAttack(IShipAPI& api, double angle, coordinate target)
 
                     if (ok && y1 - ((int)y1) / 1000 * 1000 < 200)
                     {
-                        coordinate tmp(x1, y1 - 1000);
+                        coordinate tmp(x1/1000, (y1 - 1000)/1000);
                         THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
                         if (tmp != target && (tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
                         {
@@ -613,7 +613,7 @@ inline coordinate MyAttack(IShipAPI& api, double angle, coordinate target)
                     }
                     else if (ok && ((int)y1) / 1000 * 1000 + 1000 - y1 < 200)
                     {
-                        coordinate tmp(x1, y1 + 1000);
+                        coordinate tmp(x1/1000, (y1 + 1000)/1000);
                         THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
                         if (tmp != target && (tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
                         {
@@ -1966,7 +1966,7 @@ namespace AttackMode
                 auto construction = res.value();
                 if(Myside(construction.teamID)){
                     return true;
-                }else if(construction.hp <= 0) {
+                }else if(construction.hp <= 950) {
                     Commute::report(api, Instruction_RefreshConstruction, Parameter_DestroyedEnemyConstruction, tar);
                     return true;
                 }else{
@@ -2515,7 +2515,7 @@ void AI::play(IShipAPI& api)
                             AttackMode::target.push(*(MapInfo::PositionLists[MapInfo::EnemyHome].begin()));
                             break;
                         default:
-                            AttackMode::target.push({32,10});
+                            AttackMode::target.push(ShipInfo::ShipBuffer.target);
                             break;
                     }
                     break;
@@ -2779,7 +2779,6 @@ bool init_root = false;
 BT::SequenceNode<ITeamAPI> root;
 
 
-
 void AI::play(ITeamAPI& api)  // 默认team playerID 为0
 {
 
@@ -2824,11 +2823,12 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     if (!init_root)
     {
         init_root = true;
+
         root = {
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_1,PRODUCE)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(HomeInfo::first_id, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipAvailable(3)}),
-            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, INSPECT, MODEPARAM_AttackHome)}),
+            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, ATTACK, MODEPARAM_AttackHome)}),
 
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipAvailable(3 - HomeInfo::first_id)}),
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, CONSTRUCT, MODEPARAM_ConstructFactory)}),
