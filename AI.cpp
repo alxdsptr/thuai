@@ -58,6 +58,12 @@ extern const bool asynchronous = false;
 #define RecoveryID 4
 #define RATIO 1000
 
+#define PRIORITY_Inspection (0.5)
+#define PRIORITY_Recovery (4)
+#define PRIORITY_ReturnHome (3)
+#define PRIORITY_Dodge (2)
+#define PRIORITY_Normal (0)
+
 // 选手需要依次将player1到player4的船类型在这里定义
 extern const std::array<THUAI7::ShipType, 4> ShipTypeDict = {
     THUAI7::ShipType::CivilianShip,
@@ -504,6 +510,8 @@ inline coordinate MyAttack(IShipAPI& api, double angle, coordinate target)
 
     double fulldistance = euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, tar.x,tar.y);
 
+    std::cout << "ENter MyATTACK\n";
+
     /**
     * @brief
     * y
@@ -614,15 +622,25 @@ inline coordinate MyAttack(IShipAPI& api, double angle, coordinate target)
 
     if (judge_ok())
     {
+        std::cout << "ENter MyATTACK: Judge OK!!!\n";
+
         api.Attack(angle);
         return {-1, -1};
     }
+    std::cout << "ENter MyATTACK: NOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOPPPPPPPPPPPPPPPPPPPPPEEEEEEEEEEEEEEEE\n";
+
     double tmp_ang = angle;
     for (angle=tmp_ang-PI/2; angle <tmp_ang+PI/2 ; angle+=PI/16)
     {
         if (judge_ok())
         {
-            return {(int)(tar.x - cos(angle) * fulldistance), (int)(tar.y - sin(angle) * fulldistance)};
+            coordinate tmp = {(int)(tar.x - cos(angle) * fulldistance) / 1000, (int)(tar.y - sin(angle) * fulldistance) / 1000};
+            MapInfo::Place pltye = MapInfo::fullmap[tmp.x][tmp.y];
+            std::cout << "MyAttack detected an available place, target=" << tmp.x << "  " << tmp.y << "\n";
+            if (pltye==MapInfo::Shadow||pltye==MapInfo::Space)
+            {
+                return tmp;
+            }
         }
     }
 
@@ -1418,6 +1436,11 @@ public:
     }
     bool operator()(IShipAPI &api)
     {
+        std::cout << "RoadSearch TO:" << target.x << "," << target.y << "\n";
+        if (target.x>49||target.x<0||target.y<0||target.y>49)
+        {
+            return true;
+        }
         if (path.empty())
         {
             if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target) <= 1)
@@ -1731,8 +1754,9 @@ namespace IdleMode
                     InspectionList = MapInfo::Ori_PositionLists[MapInfo::Place::Construction];
                 }
                 LoadNearestPosition(api);
+                std::cout << "Triggered RoadSearch,target:" << target.x << "," << target.y << "\n";
                 auto search = std::make_shared<RoadSearch>(target, near_enough);
-                int priority = 1.5 * RATIO + callStack.size();
+                int priority = PRIORITY_Normal * RATIO + callStack.size();
                 callStack.push({*search, RoadSearchID, priority});
                 return false;
             }
@@ -1827,8 +1851,9 @@ namespace ConstructMode
         {
             if (!GetNearestConstruction(api))
                 return false;
+            std::cout << "Triggered RoadSearch,target:" << target.x << "," << target.y << "\n";
             auto search = std::make_shared<RoadSearch>(target, near_enough);
-            int priority = 1 * RATIO + callStack.size();
+            int priority = PRIORITY_Normal * RATIO + callStack.size();
             callStack.push({*search, RoadSearchID, priority});
         }
         return false;
@@ -1895,8 +1920,10 @@ namespace ProduceMode
             {
                 return false;
             }
+            std::cout << "Triggered RoadSearch,target:" << target.x << "," << target.y << "\n";
+
             auto search = std::make_shared<RoadSearch>(target, near_enough);
-            int priority = 1 * RATIO + callStack.size();
+            int priority = PRIORITY_Normal * RATIO + callStack.size();
             callStack.push({*search, RoadSearchID, priority});
 
         }
@@ -1993,8 +2020,10 @@ namespace AttackMode
                     {
                         return false;
                     };
+                    std::cout << "Triggered RoadSearch,target:" << tmp.x << "," << tmp.y << "\n";
+
                     auto search = std::make_shared<RoadSearch>(tmp, end_condition);
-                    int priority = 1 * RATIO + callStack.size();
+                    int priority = PRIORITY_Normal * RATIO + callStack.size();
                     callStack.push({*search, RoadSearchID, priority});
                 }
             }
@@ -2005,8 +2034,10 @@ namespace AttackMode
                     return (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, cur_target.x * 1000 + 500, cur_target.y * 1000 + 500)
                         <= WeaponToDis(ShipInfo::myself.me.weaponType) and api.HaveView(cur_target.x * 1000 + 500, cur_target.y * 1000 + 500));
                 };
+                std::cout << "Triggered RoadSearch,target:" << cur_target.x << "," << cur_target.y << "\n";
+
                 auto search = std::make_shared<RoadSearch>(cur_target, end_condition);
-                int priority = 1 * RATIO + callStack.size();
+                int priority = PRIORITY_Normal * RATIO + callStack.size();
                 callStack.push({*search, RoadSearchID, priority});
             }
         }
@@ -2165,18 +2196,19 @@ inline unsigned char Conquerable(THUAI7::Ship & enemy)
 
 auto MyRecovery = [] (IShipAPI & api)
 {
-    //std::cout << "Enter RecoveryMode\n";
+    std::cout << "Enter RecoveryMode\n";
     int fullHp = ((ShipInfo::myself.me.shipType == THUAI7::ShipType::CivilianShip) ? (3000) : ((ShipInfo::myself.me.shipType == THUAI7::ShipType::MilitaryShip) ? 4000 : 12000));
     if (ShipInfo::myself.me.hp >= fullHp-1)
     {
-        return true;//血量回满则退出
-        //std::cout << "RecoveryMode：Full\n";
+        
+        std::cout << "RecoveryMode：Full\n";
+        return true;  // 血量回满则退出
     }
     else
     {
         if (ShipInfo::myself.me.shipState==THUAI7::ShipState::Recovering)
         {
-            //std::cout << "RecoveryMode：Continue\n";
+            std::cout << "RecoveryMode：Continue\n";
 
             return false;//正在回血则继续
         }
@@ -2184,19 +2216,19 @@ auto MyRecovery = [] (IShipAPI & api)
         {
             if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, *MapInfo::PositionLists[MapInfo::MyHome].begin()) <= 1)
             {
-                api.Recover(fullHp-ShipInfo::myself.me.hp);
-                //std::cout << "Recover Called, status:" << (reply.get() ? "success\n" : "fail\n");
+                auto reply=api.Recover(fullHp-ShipInfo::myself.me.hp);
+                std::cout << "Recover Called, status:" << (reply.get() ? "success\n" : "fail\n");
 
                 return false;
             }
             else
             {
-                //std::cout << "RecoveryMode：RoadSearch\n";
+                std::cout << "RecoveryMode：RoadSearch\n";
 
                 //没到家就寻路
                 auto search = std::make_shared<RoadSearch>(*MapInfo::PositionLists[MapInfo::MyHome].begin(), [](IShipAPI& api)
                                                            { return (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, (*MapInfo::PositionLists[MapInfo::MyHome].begin()).x, (*MapInfo::PositionLists[MapInfo::MyHome].begin()).y) <= 1); });
-                int priority = 4 * RATIO + callStack.size();
+                int priority = PRIORITY_Recovery * RATIO + callStack.size();
                 callStack.push({*search, RoadSearchID, priority});
 
                 return false;
@@ -2330,9 +2362,11 @@ auto Inspecting = [](IShipAPI& api)
     else//没到地点，寻路
     {
         coordinate tmp = {x_position, y_position[cur_hole]};
+        std::cout << "Triggered RoadSearch,target:" << tmp.x << "," << tmp.y << "\n";
+
         auto search = std::make_shared<RoadSearch>(tmp, [](IShipAPI& api)
                                                    { return false;});
-        int priority = 0.5 * RATIO + callStack.size();
+        int priority = PRIORITY_Inspection * RATIO + callStack.size();
         callStack.push({*search, RoadSearchID, priority});
         return false;
     }
@@ -2500,7 +2534,7 @@ void AI::play(IShipAPI& api)
         if (interrupt_codeRecorder.find(RecoveryID)==interrupt_codeRecorder.end())
         {
             interrupt_codeRecorder.insert(RecoveryID);
-            int pri = 4 * RATIO + callStack.size();
+            int pri = PRIORITY_Recovery * RATIO + callStack.size();
             callStack.push({MyRecovery, RecoveryID, pri});
         }
     }
@@ -2546,8 +2580,10 @@ void AI::play(IShipAPI& api)
                     coordinate target = *MapInfo::PositionLists[MapInfo::MyHome].begin();
                     auto end_condition = [](IShipAPI&)
                     { return false; };
+                    std::cout << "Triggered RoadSearch,target:" << target.x << "," << target.y << "\n";
+
                     auto search = std::make_shared<RoadSearch>(target, end_condition);
-                    int prior = 3 * RATIO + callStack.size();
+                    int prior = PRIORITY_ReturnHome * RATIO + callStack.size();
                     callStack.push({*search, ReturnHomeID, prior});
                     interrupt_codeRecorder.insert(ReturnHomeID);
                 }
@@ -2567,7 +2603,7 @@ void AI::play(IShipAPI& api)
                         auto init_list = {new BT::eventNode<IShipAPI>{Conditions::always_ship, ShipAction::MoveFunc(move_angle, 200)}, new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), ShipAction::AttackFunc(i->x, i->y)}};
                         auto dodgeNode = std::make_shared<BT::SequenceNode<IShipAPI>>(std::move(init_list));
                         interrupt_codeRecorder.insert(DodgeID);
-                        int priority = 2 * RATIO + callStack.size();
+                        int priority = PRIORITY_Dodge * RATIO + callStack.size();
                         callStack.push({[dodgeNode](IShipAPI& api)
                                         { return dodgeNode->perform(api) == BT::SUCCESS; },
                                         DodgeID,
@@ -2608,9 +2644,11 @@ void AI::play(IShipAPI& api)
     auto temp = callStack.top();
     while (temp.func(api))
     {
+        std::cout << "Exit!!!!!!,id="<< temp.id << "\n";
 		callStack.pop();
         interrupt_codeRecorder.erase(temp.id);
         temp = callStack.top();
+        std::cout << "Next id=" << temp.id << "\n";
 	}
 
 //    Commute::report(api);
