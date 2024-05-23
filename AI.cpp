@@ -43,6 +43,7 @@ extern const bool asynchronous = false;
 #define Instruction_RefreshConstruction (1<<1)
 #define Instruction_AttackState (1<<2)
 
+#define Instruction_Inspecting (4)
 
 #define Parameter_ResourceRunningOut (1)
 #define Parameter_ConstructionBuildUp (1)
@@ -56,6 +57,8 @@ extern const bool asynchronous = false;
 #define RoadSearchID 2
 #define ReturnHomeID 3
 #define RecoveryID 4
+#define InspectID 5
+
 #define RATIO 1000
 
 #define PRIORITY_Inspection (0.5)
@@ -138,6 +141,7 @@ enum ShipMode
     ROB,
     RUIN,
     FOLLOW,
+    INSPECT
 };
 
 /**
@@ -2237,10 +2241,10 @@ auto MyRecovery = [] (IShipAPI & api)
 auto Inspecting = [](IShipAPI& api) 
 {
     static int initialized = 0;
-    int x_position;
-    int y_position[3] = {-5,0,1000};
+    static int x_position;
+    static int y_position[3] = {-5,0,1000};
     static int cur_hole = 1;
-    int dir = 1;
+    static int dir = 1;
     if (!initialized)
     {
         if (MapInfo::MySide == RED)
@@ -2271,15 +2275,37 @@ auto Inspecting = [](IShipAPI& api)
                 y_position[1] = i.y;
             }
         }
+        for (auto const& i : MapInfo::PositionLists[MapInfo::ClosedWormhole])
+        {
+            if ((i.x + dir - x_position) * dir > 0)
+            {
+                x_position = i.x + dir;
+            }
+            if (i.y < 16 && i.y > y_position[0])
+            {
+                y_position[0] = i.y;
+            }
+            else if (i.y > 30 && i.y < y_position[2])
+            {
+                y_position[2] = i.y;
+            }
+            else if (i.y > 16 && i.y < 30)
+            {
+                y_position[1] = i.y;
+            }
+        }
         initialized = 1;
     }
     int distance = manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, x_position, y_position[cur_hole]);
     if (distance<=1)
     {
+        std::cout << "Inspecting:: 1\n";
         if (distance>0)
         {
-            if (ShipInfo::myself.me.shipState!=THUAI7::ShipState::Moving)
+            std::cout << "Inspecting:: 2\n";
+            if (ShipInfo::myself.me.shipState != THUAI7::ShipState::Moving)
             {
+                std::cout << "Inspecting:: 3\n";
                 api.EndAllAction();
                 double angle = atan2(y_position[cur_hole] * 1000 + 500 - ShipInfo::myself.me.y, x_position * 1000 + 500 - ShipInfo::myself.me.x);
                 double time = euclidean_distance(x_position * 1000 + 500, y_position[cur_hole] * 1000 + 500, ShipInfo::myself.me.x, ShipInfo::myself.me.y) / ShipInfo::myself.me.speed * 1000;
@@ -2288,10 +2314,13 @@ auto Inspecting = [](IShipAPI& api)
 
             return false;
         }
+        std::cout << "Inspecting:: 4\n";
+
         int holehp = api.GetWormholeHp(x_position - dir, y_position[cur_hole]);
         if (holehp>0)
         {
-            //如果原本记录为关闭，则记录为打开，并报告
+            std::cout << "Inspecting:: 5\n";
+            // 如果原本记录为关闭，则记录为打开，并报告
             coordinate tmp(x_position - dir, y_position[cur_hole]);
             if (holehp >= 12000 && MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())
             {
@@ -2312,21 +2341,29 @@ auto Inspecting = [](IShipAPI& api)
             }
 
             //如果允许攻击，则攻击
-            if (holehp>800&&ShipInfo::WhetherAttackWormhole)
+            if (holehp>1000&&ShipInfo::WhetherAttackWormhole)
             {
-                coordinate result=MyAttack(api, atan2(tmp.y * 1000 + 500 - ShipInfo::myself.me.y, tmp.x * 1000 + 500 - ShipInfo::myself.me.x), tmp);
+                std::cout << "Inspecting:: 6\n";
+                coordinate result = MyAttack(api, atan2(tmp.y * 1000 + 500 - ShipInfo::myself.me.y, tmp.x * 1000 + 500 - ShipInfo::myself.me.x), tmp);
             }
 
-            if (holehp<12000&&MapInfo::PositionLists[MapInfo::OpenWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::OpenWormhole].end())
+            if (holehp<950&&MapInfo::PositionLists[MapInfo::OpenWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::OpenWormhole].end())
             {
                 for (auto const& i : MapInfo::PositionLists[MapInfo::OpenWormhole])
                 {
+                    std::cout << i.x << "," << i.y << "\n";
                     if (abs(i.y - tmp.y) < 2)
                     {
                         MapInfo::PositionLists[MapInfo::ClosedWormhole].insert(i);
                         i = MapInfo::PositionLists[MapInfo::OpenWormhole].erase(i);
                     }
                 }
+            }
+
+            if (holehp < 950)
+            {
+                std::cout << "Inspecting:: 7\n";
+                cur_hole = (cur_hole + 1) % 3;
             }
             return false;
         }
@@ -2344,18 +2381,18 @@ auto Inspecting = [](IShipAPI& api)
                     }
                 }
             }
-        }
-
-        if (holehp<800)
-        {
+            std::cout << "Inspecting:: 7\n";
             cur_hole = (cur_hole + 1) % 3;
         }
+
+
 
         return false;
 
     }
     else//没到地点，寻路
     {
+        std::cout << "Inspecting:: 8\n";
         coordinate tmp = {x_position, y_position[cur_hole]};
         std::cout << "Triggered RoadSearch,target:" << tmp.x << "," << tmp.y << "\n";
 
@@ -2473,6 +2510,8 @@ void AI::play(IShipAPI& api)
                             AttackMode::target.push({32,10});
                             break;
                     }
+                    break;
+                case INSPECT:
                     break;
                 default:
                     break;
@@ -2710,6 +2749,10 @@ bool ShipStep(IShipAPI& api)
     else if (nextMode == FOLLOW)
     {
     }
+    else if (nextMode==INSPECT)
+    {
+        res = Inspecting(api);
+    }
     if (res)
     {
         ShipStep(api);
@@ -2777,7 +2820,7 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_1,PRODUCE)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(HomeInfo::first_id, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipAvailable(3)}),
-            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, ATTACK, MODEPARAM_AttackHome)}),
+            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, INSPECT, MODEPARAM_AttackHome)}),
 
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipAvailable(3 - HomeInfo::first_id)}),
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, CONSTRUCT, MODEPARAM_ConstructFactory)}),
