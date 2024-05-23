@@ -379,6 +379,13 @@ namespace ShipInfo
 
 
     /**
+     * @brief 是否攻击虫洞
+     */
+    bool WhetherAttackWormhole = 1;
+
+
+
+    /**
      * @brief 是否是初始化状态
      */
     int init = 1;
@@ -1493,7 +1500,7 @@ public:
             path.pop_front();
             int dx = next.x * 1000 + 500 - ShipInfo::myself.me.x;
             int dy = next.y * 1000 + 500 - ShipInfo::myself.me.y;
-            double time = sqrt(dx * dx + dy * dy) / 3.0;
+            double time = sqrt(dx * dx + dy * dy) / ShipInfo::myself.me.speed*1000;
             double angle = atan2(dy, dx);
             #ifdef DEBUG
             std::cout << "x: " << ShipInfo::myself.me.x << " y: " << ShipInfo::myself.me.y << "nx: " << next.x << "ny: " << next.y << std::endl;
@@ -1694,7 +1701,7 @@ namespace IdleMode
                     }
                     return true;
                 }
-                if (construction.hp > 0)
+                if (construction.hp > 1000)
                 {
                     if (ShipInfo::myself.me.shipState != THUAI7::ShipState::Attacking and ShipInfo::myself.me.shipState != THUAI7::ShipState::Swinging)
                     {
@@ -2041,11 +2048,11 @@ inline bool In_ShootingDistance(int x, int y, int weapondistance)
 
 
 double WeaponHarm[6][3] = {
-    {1200, 1.5, 0.6},
-    {1300, 2, 0.4},
-    {1800, 0.4, 1.5},
-    {1600, 1, 1000},
-    {1800, 2, 2}
+    {800, 1.5, 0.6},
+    {1000, 2, 0.4},
+    {1200, 0.4, 1.5},
+    {1100, 1, 1000},
+    {1600, 2, 2}
 };
 struct health
 {
@@ -2160,7 +2167,7 @@ auto MyRecovery = [] (IShipAPI & api)
 {
     //std::cout << "Enter RecoveryMode\n";
     int fullHp = ((ShipInfo::myself.me.shipType == THUAI7::ShipType::CivilianShip) ? (3000) : ((ShipInfo::myself.me.shipType == THUAI7::ShipType::MilitaryShip) ? 4000 : 12000));
-    if (ShipInfo::myself.me.hp == fullHp)
+    if (ShipInfo::myself.me.hp >= fullHp-1)
     {
         return true;//血量回满则退出
         //std::cout << "RecoveryMode：Full\n";
@@ -2189,13 +2196,147 @@ auto MyRecovery = [] (IShipAPI & api)
                 //没到家就寻路
                 auto search = std::make_shared<RoadSearch>(*MapInfo::PositionLists[MapInfo::MyHome].begin(), [](IShipAPI& api)
                                                            { return (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, (*MapInfo::PositionLists[MapInfo::MyHome].begin()).x, (*MapInfo::PositionLists[MapInfo::MyHome].begin()).y) <= 1); });
-                int priority = 5 * RATIO + callStack.size();
+                int priority = 4 * RATIO + callStack.size();
                 callStack.push({*search, RoadSearchID, priority});
 
                 return false;
             }
         }
     }
+};
+
+/**
+ * @brief 巡视我方；
+ * 优先级：0.5
+ */
+auto Inspecting = [](IShipAPI& api) 
+{
+    static int initialized = 0;
+    int x_position;
+    int y_position[3] = {-5,0,1000};
+    static int cur_hole = 1;
+    int dir = 1;
+    if (!initialized)
+    {
+        if (MapInfo::MySide == RED)
+        {
+            dir = -1;
+            x_position = 1000;
+        }
+        else
+        {
+            x_position = 0;
+        }
+        for (auto const& i : MapInfo::PositionLists[MapInfo::OpenWormhole])
+        {
+            if ((i.x+dir-x_position)*dir>0)
+            {
+                x_position = i.x + dir;
+            }
+            if (i.y < 16 && i.y > y_position[0])
+            {
+                y_position[0] = i.y;
+            }
+            else if (i.y > 30 && i.y < y_position[2])
+            {
+                y_position[2] = i.y;
+            }
+            else if (i.y>16&&i.y<30)
+            {
+                y_position[1] = i.y;
+            }
+        }
+        initialized = 1;
+    }
+    int distance = manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, x_position, y_position[cur_hole]);
+    if (distance<=1)
+    {
+        if (distance>0)
+        {
+            if (ShipInfo::myself.me.shipState!=THUAI7::ShipState::Moving)
+            {
+                api.EndAllAction();
+                double angle = atan2(y_position[cur_hole] * 1000 + 500 - ShipInfo::myself.me.y, x_position * 1000 + 500 - ShipInfo::myself.me.x);
+                double time = euclidean_distance(x_position * 1000 + 500, y_position[cur_hole] * 1000 + 500, ShipInfo::myself.me.x, ShipInfo::myself.me.y) / ShipInfo::myself.me.speed * 1000;
+                api.Move((int)time, angle);
+            }
+
+            return false;
+        }
+        int holehp = api.GetWormholeHp(x_position - dir, y_position[cur_hole]);
+        if (holehp>0)
+        {
+            //如果原本记录为关闭，则记录为打开，并报告
+            coordinate tmp(x_position - dir, y_position[cur_hole]);
+            if (holehp >= 12000 && MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())
+            {
+                for (auto const& i : MapInfo::PositionLists[MapInfo::ClosedWormhole])
+                {
+                    if (abs(i.y-tmp.y)<2)
+                    {
+                        MapInfo::PositionLists[MapInfo::OpenWormhole].insert(i);
+                        coordinate del = i;
+                        MapInfo::PositionLists[MapInfo::ClosedWormhole].erase(del);
+                    }
+                }
+                //TODO：报告
+            }
+
+            //如果允许攻击，则攻击
+            if (holehp>800&&ShipInfo::WhetherAttackWormhole)
+            {
+                coordinate result=MyAttack(api, atan2(tmp.y * 1000 + 500 - ShipInfo::myself.me.y, tmp.x * 1000 + 500 - ShipInfo::myself.me.x), tmp);
+            }
+
+            if (holehp<12000&&MapInfo::PositionLists[MapInfo::OpenWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::OpenWormhole].end())
+            {
+                for (auto const& i : MapInfo::PositionLists[MapInfo::OpenWormhole])
+                {
+                    if (abs(i.y - tmp.y) < 2)
+                    {
+                        MapInfo::PositionLists[MapInfo::ClosedWormhole].insert(i);
+                        coordinate del = i;
+                        MapInfo::PositionLists[MapInfo::OpenWormhole].erase(del);
+                    }
+                }
+            }
+            return false;
+        }
+        else
+        {
+            coordinate tmp(x_position - dir, y_position[cur_hole]);
+            if (MapInfo::PositionLists[MapInfo::OpenWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::OpenWormhole].end())
+            {
+                for (auto const& i : MapInfo::PositionLists[MapInfo::OpenWormhole])
+                {
+                    if (abs(i.y - tmp.y) < 2)
+                    {
+                        MapInfo::PositionLists[MapInfo::ClosedWormhole].insert(i);
+                        coordinate del = i;
+                        MapInfo::PositionLists[MapInfo::OpenWormhole].erase(del);
+                    }
+                }
+            }
+        }
+
+        if (holehp<800)
+        {
+            cur_hole = (cur_hole + 1) % 3;
+        }
+
+        return false;
+
+    }
+    else//没到地点，寻路
+    {
+        coordinate tmp = {x_position, y_position[cur_hole]};
+        auto search = std::make_shared<RoadSearch>(tmp, [](IShipAPI& api)
+                                                   { return false;});
+        int priority = 0.5 * RATIO + callStack.size();
+        callStack.push({*search, RoadSearchID, priority});
+        return false;
+    }
+
 };
 
 
