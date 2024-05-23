@@ -190,7 +190,7 @@ namespace Commute
 namespace HomeInfo
 {
 
-    bool UsableShip[5] = {0};
+    bool UsableShip[5] = {0}, appearedId[5] = {0};
     int MyScore = 0;
     int EnemyScore = 0;
     int MyMoney = 0;
@@ -216,7 +216,7 @@ namespace HomeInfo
 
 
     void CheckInfo(ITeamAPI& api);
-}
+}  // namespace HomeInfo
 
 namespace MapInfo
 {
@@ -289,12 +289,15 @@ namespace MapInfo
             case THUAI7::PlaceType::Construction:
                 return Construction;
             case THUAI7::PlaceType::Wormhole:
-                if (y <= 15 or y >= 35)
-                {
+                if(y <= 15){
+//                    wormholes[0].push_back({x, y});
                     return ClosedWormhole;
-                }
-                else
+                }else if(y >= 35){
+//                    wormholes[2].push_back({x, y});
+                    return ClosedWormhole;
+                }else
                 {
+//                    wormholes[1].push_back({x, y});
                     return OpenWormhole;
                 }
             default:
@@ -329,10 +332,58 @@ namespace MapInfo
             }
         }
         resource_cnt = PositionLists[Resource].size();
+//#ifdef DEBUG
+//        for(int i = 0; i < 3; i++){
+//            std::cout << "Wormhole " << i << " : " << std::endl;
+//            for(auto &p : wormholes[i]){
+//                std::cout << p.x << " " << p.y << std::endl;
+//            }
+//        }
+//#endif
     }
 
 }  // namespace MapInfo
 
+const std::vector<coordinate> wormholes[3] =
+    {{{23, 10}, {23, 11}, {24, 10}, {24, 11}, {25, 10}, {25, 11}, {26, 10}, {26, 11}},
+     {{23, 24}, {23, 25}, {24, 24}, {24, 25}, {25, 24}, {25, 25}, {26, 24}, {26, 25}},
+     {{23, 38}, {23, 39}, {24, 38}, {24, 39}, {25, 38}, {25, 39}, {26, 38}, {26, 39}}};
+int getWormholeIndex(int x, int y)
+{
+    if (y <= 15)
+        return 0;
+    if (y >= 35)
+        return 2;
+    return 1;
+}
+int getWormholeIndex(coordinate temp)
+{
+    if (temp.y <= 15)
+        return 0;
+    if (temp.y >= 35)
+        return 2;
+    return 1;
+}
+void openWormhole(coordinate tmp)
+{
+    int index = getWormholeIndex(tmp);
+    for (auto const& i : wormholes[index])
+    {
+        //MapInfo::PositionLists[MapInfo::OpenWormhole].insert(i);
+        //MapInfo::PositionLists[MapInfo::ClosedWormhole].erase(i);
+        MapInfo::fullmap[i.x][i.y] = MapInfo::OpenWormhole;
+    }
+}
+void closeWormhole(coordinate tmp)
+{
+    int index = getWormholeIndex(tmp);
+    for (auto const& i : wormholes[index])
+    {
+        //MapInfo::PositionLists[MapInfo::ClosedWormhole].insert(i);
+        //MapInfo::PositionLists[MapInfo::OpenWormhole].erase(i);
+        MapInfo::fullmap[i.x][i.y] = MapInfo::ClosedWormhole;
+    }
+}
 namespace ShipInfo
 {
     struct ShipMem
@@ -490,6 +541,10 @@ double WeaponToDis(THUAI7::WeaponType p)
 {
     return WeaponDis[(int)p];
 }
+bool can_walk(int x, int y);
+bool can_attack(int x, int y);
+bool can_see(int x, int y);
+
 
 /**
  * @brief 加入了判断有无遮挡物功能的攻击函数（注意，不保证一定在射程内，仅检测到目标的途中有无障碍）
@@ -517,104 +572,110 @@ inline coordinate MyAttack(IShipAPI& api, double angle, coordinate target)
     * |  |
     * ①--③ →x
     */
-    coordinate Gridpoint[4];
+    //coordinate Gridpoint[4];
 
     auto judge_ok = [&]() {
         bool ok = true;
+        static int r = 200;
         for (double i = 400; i < fulldistance and ok; i += 400)
         {
-            double x1 = x + cos(angle) * i;
-            double y1 = y + sin(angle) * i;
+            int x1 = x + cos(angle) * i;
+            int y1 = y + sin(angle) * i;
+            int x0 = (x1 / 1000) * 1000;
+            int y0 = (y1 / 1000) * 1000;
+            int lx = x1 - x0;
+            int ly = y1 - y0;
+            std::vector<coordinate> judge;
 
-            coordinate tmp(((int)x1) / 1000, ((int)y1) / 1000);  // 格子数的坐标
+            coordinate tmp(x1 / 1000, y1 / 1000);  // 格子数的坐标
             THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
             if (tmp==target)
             {
                 break;
             }
-            if (tmp != target && (tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
+            if (tmp != target and !can_attack(tmp.x, tmp.y))
+                //(tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
             {
-                ok = false;
+                return false;
+            }
+            if (lx < r)
+            {
+                judge.push_back({tmp.x - 1, tmp.y});
+            }
+            else if (lx > 1000 - r)
+			{
+				judge.push_back({tmp.x + 1, tmp.y});
+			}
+            if (ly < r)
+            {
+                judge.push_back({tmp.x, tmp.y - 1});
+			}
+			else if (ly > 1000 - r){
+                judge.push_back({tmp.x, tmp.y + 1});
+            }
+            if (euclidean_distance(x1, y1, x0, y0) < r)
+			{
+				judge.push_back({tmp.x - 1, tmp.y - 1});
+			}
+            else if (euclidean_distance(x1, y1, x0 + 1000, y0) < r)
+            {
+				judge.push_back({tmp.x + 1, tmp.y - 1});
+            }
+            else if (euclidean_distance(x1, y1, x0 + 1000, y0 + 1000) < r)
+            {
+				judge.push_back({tmp.x + 1, tmp.y + 1});
+            }
+            else if (euclidean_distance(x1, y1, x0, y0 + 1000) < r)
+            {
+				judge.push_back({tmp.x - 1, tmp.y + 1});
+            }
+            for (auto &i : judge)
+			{
+                if (i.x < 0 or i.x >= 50 or i.y < 0 or i.y >= 50)
+				{
+					continue;
+				}
+				if (i != target and !can_attack(i.x, i.y))
+				{
+					return false;
+				}
+			}
+
+
+            /*
+            int cnt = 0;
+            // 储存四个格点的坐标
+            for (int j = 0; j < 2; j++)
+            {
+                for (int k = 0; k < 2; k++)
+                {
+                    Gridpoint[cnt] = {(int)x1 / 1000 * 1000 + 1000 * j, (int)y1 / 1000 * 1000 + 1000 * k};
+                    cnt++;
+                }
             }
 
-            if (ok)
+            // 判断格点
+            for (int i = 0; i < 4 && ok; i++)
             {
-                int cnt = 0;
-                // 储存四个格点的坐标
-                for (int j = 0; j < 2; j++)
+                if (euclidean_distance(Gridpoint[i].x, Gridpoint[i].y, x1, y1) < 200)
                 {
-                    for (int k = 0; k < 2; k++)
+                    // 判断四个格子
+                    for (int j = 0; j < 2; j++)
                     {
-                        Gridpoint[cnt] = {(int)x1 / 1000 * 1000 + 1000 * j, (int)y1 / 1000 * 1000 + 1000 * k};
-                        cnt++;
-                    }
-                }
-
-                // 判断格点
-                for (int i = 0; i < 4 && ok; i++)
-                {
-                    if (euclidean_distance(Gridpoint[i].x, Gridpoint[i].y, x1, y1) < 200)
-                    {
-                        // 判断四个格子
-                        for (int j = 0; j < 2 && ok; j++)
+                        for (int k = 0; k < 2; k++)
                         {
-                            for (int k = 0; k < 2 && ok; k++)
+                            coordinate tmp((((int)Gridpoint[i].x) - 500 + 1000 * j) / 1000, (((int)Gridpoint[i].y) - 500 + 1000 * k) / 1000);  // 格子数的坐标
+                            THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
+                            if (tmp != target and !can_walk(tmp.x, tmp.y))
                             {
-                                coordinate tmp((((int)Gridpoint[i].x) - 500 + 1000 * j) / 1000, (((int)Gridpoint[i].y) - 500 + 1000 * k) / 1000);  // 格子数的坐标
-                                THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
-                                if (tmp != target && (tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
-                                {
-                                    ok = false;
-                                }
+                                return false;
                             }
                         }
                     }
                 }
-
-                if (ok)
-                {
-                    // 判断四个格子线
-                    if (x1 - ((int)x1) / 1000 * 1000 < 200)
-                    {
-                        coordinate tmp(x1 - 1000, y1);
-                        THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
-                        if (tmp != target && (tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
-                        {
-                            ok = false;
-                        }
-                    }
-                    else if (((int)x1) / 1000 * 1000 + 1000 - x1 < 200)
-                    {
-                        coordinate tmp(x1 + 1000, y1);
-                        THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
-                        if (tmp != target && (tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
-                        {
-                            ok = false;
-                        }
-                    }
-
-                    if (ok && y1 - ((int)y1) / 1000 * 1000 < 200)
-                    {
-                        coordinate tmp(x1, y1 - 1000);
-                        THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
-                        if (tmp != target && (tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
-                        {
-                            ok = false;
-                        }
-                    }
-                    else if (ok && ((int)y1) / 1000 * 1000 + 1000 - y1 < 200)
-                    {
-                        coordinate tmp(x1, y1 + 1000);
-                        THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
-                        if (tmp != target && (tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
-                        {
-                            ok = false;
-                        }
-                    }
-                }
-            }
+            }*/
         }
-        return ok;
+        return true;
     };
 
     if (judge_ok())
@@ -627,7 +688,7 @@ inline coordinate MyAttack(IShipAPI& api, double angle, coordinate target)
     std::cout << "ENter MyATTACK: NOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOPPPPPPPPPPPPPPPPPPPPPEEEEEEEEEEEEEEEE\n";
 
     double tmp_ang = angle;
-    for (angle=tmp_ang-PI/2; angle <tmp_ang+PI/2 ; angle+=PI/16)
+    for (angle = tmp_ang - PI / 2; angle < tmp_ang + PI / 2 ; angle += PI / 16)
     {
         if (judge_ok())
         {
@@ -642,8 +703,6 @@ inline coordinate MyAttack(IShipAPI& api, double angle, coordinate target)
     }
 
     return {-2, -2};
-
-
 
 }
 
@@ -1156,9 +1215,10 @@ namespace HomeInfo
                     first_id = id;
                 }
                 MyShips[id - 1] = *sps[i];
-                if (UsableShip[id] == false)
+                if (UsableShip[id] == false and !appearedId[id])
                 {
                     index_to_id[ship_cnt] = id;
+                    appearedId[id] = true;
                     ship_cnt++;
                 }
                 temp[id] = true;
@@ -1171,10 +1231,10 @@ namespace HomeInfo
                 }
                 UsableShip[i] = temp[i];
             }
+                /*
             if (init)
             {
                 coordinate tmp(MyShips[0].x / 1000, MyShips[0].y/1000);
-                /*
                 for (size_t i = 0; i < 2; i++)
                 {
                     if (manhatten_distance(tmp.x,tmp.y,MapInfo::PositionLists[MapInfo::Home][i])<=2)
@@ -1183,8 +1243,8 @@ namespace HomeInfo
                         EnemyHomePos = MapInfo::PositionLists[MapInfo::Home][1 - i];
                         break;
                     }
-                }*/
-            }
+                }
+            }*/
         }
 
         //刷新敌方舰船
@@ -1349,10 +1409,20 @@ namespace Commute
 
 
 
-bool is_empty(int x, int y)
+bool can_walk(int x, int y)
 {
     MapInfo::Place t = MapInfo::fullmap[x][y];
     return (t == MapInfo::Space or t == MapInfo::Shadow or t == MapInfo::OpenWormhole);
+}
+bool can_attack(int x, int y)
+{
+    MapInfo::Place t = MapInfo::fullmap[x][y];
+    return (t == MapInfo::Space or t == MapInfo::Shadow or t == MapInfo::OpenWormhole or t == MapInfo::ClosedWormhole);
+}
+bool can_see(int x, int y)
+{
+    MapInfo::Place t = MapInfo::fullmap[x][y];
+    return t != MapInfo::Ruin;
 }
 class RoadSearch
 {
@@ -1400,13 +1470,13 @@ public:
                 {
                     if (i == 0 and j == 0)
                         continue;
-                    if (i == -1 and j == -1 and (!is_empty(now.x - 1, now.y) or !is_empty(now.x, now.y - 1)))
+                    if (i == -1 and j == -1 and (!can_walk(now.x - 1, now.y) or !can_walk(now.x, now.y - 1)))
                         continue;
-                    if (i == 1 and j == -1 and (!is_empty(now.x + 1, now.y) or !is_empty(now.x, now.y - 1)))
+                    if (i == 1 and j == -1 and (!can_walk(now.x + 1, now.y) or !can_walk(now.x, now.y - 1)))
                         continue;
-                    if (i == -1 and j == 1 and (!is_empty(now.x - 1, now.y) or !is_empty(now.x, now.y + 1)))
+                    if (i == -1 and j == 1 and (!can_walk(now.x - 1, now.y) or !can_walk(now.x, now.y + 1)))
                         continue;
-                    if (i == 1 and j == 1 and (!is_empty(now.x + 1, now.y) or !is_empty(now.x, now.y + 1)))
+                    if (i == 1 and j == 1 and (!can_walk(now.x + 1, now.y) or !can_walk(now.x, now.y + 1)))
                         continue;
                     int nx = now.x + i, ny = now.y + j;
                     if (nx < 0 or nx >= 50 or ny < 0 or ny >= 50 or visited[nx][ny])
@@ -1421,7 +1491,7 @@ public:
                         pq.push({nx, ny, coordinate{now.x, now.y}, now.cost + cost, 0});
                     }
                     // if ((t != MapInfo::Space and t != MapInfo::Shadow and t != MapInfo::OpenWormhole) || (coordinate(nx, ny) == *MapInfo::NoStep.find(coordinate(nx, ny))))
-                    if (!is_empty(nx, ny))
+                    if (!can_walk(nx, ny))
                         continue;
                     double cost = sqrt(i * i + j * j);
                     int h = manhatten_distance(nx, ny, x2, y2);
@@ -1538,42 +1608,31 @@ public:
         return false;
     }
 };
-
-namespace RoadSearchMode
+class RoadSearchRange
 {
-
-
-
-    /**
-     * @brief 已经弃用，请勿使用
-     */
-    /*
-    std::deque<coordinate> search_road(int x1, int y1, THUAI7::PlaceType type, IShipAPI& api)
+public:
+    coordinate &target, last_location = {-1, -1};
+    std::deque<coordinate> path;
+    double last_angle = 0;
+    bool visited[maxLen][maxLen];
+    const std::unordered_set<coordinate, PointHash>& des;
+    coordinate from[maxLen][maxLen];
+    std::function<bool(IShipAPI& api)> end_condition;
+    RoadSearchRange(coordinate&tar, const std::unordered_set<coordinate, PointHash>& des, std::function<bool(IShipAPI& api)> end_condition) :
+        target(tar),
+            des(des),
+            end_condition(std::move(end_condition))
+    {
+    }
+    std::deque<coordinate> search_road(int x1, int y1, const std::unordered_set<coordinate, PointHash> &des, IShipAPI& api)
     {
         int min_dis = 0x7fffffff;
-        auto index = MapInfo::PlaceTypeConvert(type, 0, 0);
-        auto& des = MapInfo::PositionLists[index];
-        for (auto i = des.begin(); i != des.end();)
+//        auto index = MapInfo::PlaceTypeConvert(type, 0, 0);
+        for (const auto& i : des)
         {
-            if (type == THUAI7::PlaceType::Resource)
-            {
-                std::cout << "x: " << (*i).x << " y: " << (*i).y << std::endl;
-                int temp = api.GetResourceState((*i).x, (*i).y);
-                if (temp == 0)
-                {
-                    i = des.erase(i);
-                    continue;
-                }
-            }
-            else if (type == THUAI7::PlaceType::Construction and api.GetConstructionState((*i).x, (*i).y).second > 0)
-            {
-                i = des.erase(i);
-                continue;
-            }
-            int temp = manhatten_distance(x1, y1, *i);
+            int temp = manhatten_distance(x1, y1, i);
             if (temp < min_dis)
                 min_dis = temp;
-            i++;
         }
         std::priority_queue<node> pq;
         pq.push({x1, y1, coordinate{-1, -1}, 0, (double)min_dis});
@@ -1605,13 +1664,13 @@ namespace RoadSearchMode
                 {
                     if (i == 0 and j == 0)
                         continue;
-                    if (i == -1 and j == -1 and (!is_empty(now.x - 1,now.y) or !is_empty(now.x,now.y - 1)))
+                    if (i == -1 and j == -1 and (!can_walk(now.x - 1,now.y) or !can_walk(now.x,now.y - 1)))
                         continue;
-                    if (i == 1 and j == -1 and (!is_empty(now.x + 1,now.y) or !is_empty(now.x,now.y - 1)))
+                    if (i == 1 and j == -1 and (!can_walk(now.x + 1,now.y) or !can_walk(now.x,now.y - 1)))
                         continue;
-                    if (i == -1 and j == 1 and (!is_empty(now.x - 1,now.y) or !is_empty(now.x,now.y + 1)))
+                    if (i == -1 and j == 1 and (!can_walk(now.x - 1,now.y) or !can_walk(now.x,now.y + 1)))
                         continue;
-                    if (i == 1 and j == 1 and (!is_empty(now.x + 1,now.y) or !is_empty(now.x,now.y + 1)))
+                    if (i == 1 and j == 1 and (!can_walk(now.x + 1,now.y) or !can_walk(now.x,now.y + 1)))
                         continue;
                     int nx = now.x + i, ny = now.y + j;
                     if (nx < 0 or nx >= 50 or ny < 0 or ny >= 50 or visited[nx][ny])
@@ -1623,13 +1682,13 @@ namespace RoadSearchMode
                     }
                     THUAI7::PlaceType t = MapInfo::map[nx][ny];
                     //if (t != THUAI7::PlaceType::Space and t != THUAI7::PlaceType::Shadow and t != THUAI7::PlaceType::Wormhole)
-                    if (!is_empty(nx, ny))
+                    if (!can_walk(nx, ny))
                         continue;
                     double cost = sqrt(i * i + j * j);
                     min_dis = 0x7fffffff;
                     for (auto const& k : des)
                     {
-                        int temp = manhatten_distance(x1, y1, k);
+                        int temp = manhatten_distance(nx, ny, k);
                         if (temp < min_dis)
                             min_dis = temp;
                     }
@@ -1637,8 +1696,132 @@ namespace RoadSearchMode
                 }
             }
         }
-    }*/
-}
+        return {};
+    }
+    bool operator()(IShipAPI &api)
+    {
+        std::cout << "RoadSearch TO:" << target.x << "," << target.y << "\n";
+        /*
+        if (target.x>49||target.x<0||target.y<0||target.y>49)
+        {
+            return true;
+        }*/
+        if (des.empty())
+        {
+            return true;
+        }
+        if (path.empty())
+        {
+            if (target.x == -1)
+            {
+                path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, des, api);
+                target = path.back();
+            }
+            else
+            {
+                if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target) <= 1)
+                {
+                    return true;
+                }
+                path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, des, api);
+                target = path.back();
+            }
+        }
+        if (end_condition(api))
+        {
+            return true;
+        }
+        if (api.GetSelfInfo()->shipState == THUAI7::ShipState::Idle and !path.empty())
+        {
+            std::vector<std::pair<coordinate, MapInfo::Place>> temp;
+            auto saveAndChange = [&temp](int x, int y)
+            {
+                temp.push_back({{x, y}, MapInfo::fullmap[x][y]});
+                MapInfo::fullmap[x][y] = MapInfo::Place::Ruin;
+            };
+            auto ProcessNearbyShip = [&saveAndChange](std::shared_ptr<const THUAI7::Ship> ship)
+            {
+                THUAI7::Ship& me = ShipInfo::myself.me;
+                int x = ship->x / 1000, y = ship->y / 1000, lx = ship->x % 1000, ly = ship->y % 1000;
+                int mx = ShipInfo::myself.me.x / 1000, my = ShipInfo::myself.me.y / 1000;
+                if (euclidean_distance(ship->x, ship->y, me.x, me.y) < 2000)
+                {
+                    saveAndChange(x, y);
+                    if (lx <= 420)
+                    {
+                        saveAndChange(x - 1, y);
+                    }
+                    else if (lx >= 580)
+                    {
+                        saveAndChange(x + 1, y);
+                    }
+                    if (ly <= 420)
+                    {
+                        saveAndChange(x, y - 1);
+                    }
+                    else if (ly >= 580)
+                    {
+                        saveAndChange(x, y + 1);
+                    }
+                }
+            };
+            for (auto const& ship : ShipInfo::FriendShips)
+            {
+                ProcessNearbyShip(ship);
+            }
+            for (auto const& ship : ShipInfo::Enemies)
+            {
+                ProcessNearbyShip(ship);
+            }
+            if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, last_location.x, last_location.y) < 100)
+            {
+                last_location = {ShipInfo::myself.me.x, ShipInfo::myself.me.y};
+                std::cout << "move backward" << std::endl;
+                for (const auto& i : temp)
+                {
+                    MapInfo::fullmap[i.first.x][i.first.y] = i.second;
+                }
+                api.Move(300, last_angle + PI);
+                return false;
+            }
+            else if (!temp.empty() or euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, path.front().x * 1000 + 500, path.front().y * 1000 + 500) > 1500)
+            {
+                path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, des, api);
+                target = path.back();
+                for (const auto& i : temp)
+                {
+                    MapInfo::fullmap[i.first.x][i.first.y] = i.second;
+                }
+                if (path.empty())
+                {
+                    return false;
+                }
+            }
+
+            auto next = path.front();
+            path.pop_front();
+            int dx = next.x * 1000 + 500 - ShipInfo::myself.me.x;
+            int dy = next.y * 1000 + 500 - ShipInfo::myself.me.y;
+            double time = sqrt(dx * dx + dy * dy) / ShipInfo::myself.me.speed*1000;
+            double angle = atan2(dy, dx);
+#ifdef DEBUG
+            std::cout << "x: " << ShipInfo::myself.me.x << " y: " << ShipInfo::myself.me.y << "nx: " << next.x << "ny: " << next.y << std::endl;
+            std::cout << "dx: " << dx << " dy: " << dy << std::endl;
+            std::cout << "time: " << time << " angle: " << angle << std::endl;
+#endif
+            last_angle = angle;
+            last_location = {ShipInfo::myself.me.x, ShipInfo::myself.me.y};
+            auto res = api.Move((int)time, angle);
+            if (!res.get())
+            {
+                std::cout << "move fail";
+            }
+        }
+        return false;
+    }
+};
+
+
 
 
 struct callFunc
@@ -1770,6 +1953,7 @@ namespace ConstructMode
 {
     coordinate target = {-1, -1};
 
+    /*
     bool GetNearestConstruction(IShipAPI& api)
     {
         coordinate tmp;
@@ -1789,7 +1973,7 @@ namespace ConstructMode
 		}
         target = tmp;
         return true;
-    }
+    }*/
 
     auto near_enough = [](IShipAPI& api)
     {
@@ -1803,6 +1987,10 @@ namespace ConstructMode
         {
             return false;
         }
+        if (MapInfo::PositionLists[MapInfo::Construction].empty())
+        {
+			return false;
+		}
         if (near_enough(api))
         {
             std::cout << "near enough" << std::endl;
@@ -1846,10 +2034,10 @@ namespace ConstructMode
         }
         else
         {
-            if (!GetNearestConstruction(api))
-                return false;
+            //if (!GetNearestConstruction(api))
+            //    return false;
             std::cout << "Triggered RoadSearch,target:" << target.x << "," << target.y << "\n";
-            auto search = std::make_shared<RoadSearch>(target, near_enough);
+            auto search = std::make_shared<RoadSearchRange>(target, MapInfo::PositionLists[MapInfo::Construction], near_enough);
             int priority = PRIORITY_Normal * RATIO + callStack.size();
             callStack.push({*search, RoadSearchID, priority});
         }
@@ -1862,6 +2050,7 @@ namespace ProduceMode
 
     coordinate target = {-1, -1};
 
+    /*
     bool GetNearestResource(IShipAPI& api)
     {
         coordinate tmp;
@@ -1881,7 +2070,7 @@ namespace ProduceMode
 		}
         target = tmp;
         return true;
-    }
+    }*/
     auto near_enough = [](IShipAPI& api)
     {
         return (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target.x, target.y) <= 1);
@@ -1913,13 +2102,14 @@ namespace ProduceMode
         }
         else
         {
+            /*
             if (!GetNearestResource(api))
             {
                 return false;
-            }
+            }*/
             std::cout << "Triggered RoadSearch,target:" << target.x << "," << target.y << "\n";
 
-            auto search = std::make_shared<RoadSearch>(target, near_enough);
+            auto search = std::make_shared<RoadSearchRange>(target, MapInfo::PositionLists[MapInfo::Resource], near_enough);
             int priority = PRIORITY_Normal * RATIO + callStack.size();
             callStack.push({*search, RoadSearchID, priority});
 
@@ -2006,8 +2196,8 @@ namespace AttackMode
                 std::cout << "mydirect: " << ShipInfo::myself.me.facingDirection << std::endl;
                 std::cout << "angle: " << angle << std::endl;
                 //api.Attack(angle);
-                coordinate tmp=MyAttack(api, angle, target.front());
-                if (tmp.x<0)
+                coordinate tmp = MyAttack(api, angle, target.front());
+                if (tmp.x < 0)
                 {
                     std::cout << "NOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO!!!!\n";
                 }
@@ -2242,20 +2432,25 @@ auto Inspecting = [](IShipAPI& api)
 {
     static int initialized = 0;
     static int x_position;
-    static int y_position[3] = {-5,0,1000};
+    static int y_position[3] = {11, 25, 39};
     static int cur_hole = 1;
-    static int dir = 1;
+    static int worm_x;
+    //    static int dir = 1;
     if (!initialized)
     {
         if (MapInfo::MySide == RED)
         {
-            dir = -1;
-            x_position = 1000;
+//            dir = -1;
+//            x_position = 1000;
+            x_position = 21;
+            worm_x = 23;
         }
         else
         {
-            x_position = 0;
+            x_position = 28;
+            worm_x = 26;
         }
+        /*
         for (auto const& i : MapInfo::PositionLists[MapInfo::OpenWormhole])
         {
             if ((i.x + dir - x_position) * dir>0)
@@ -2293,13 +2488,14 @@ auto Inspecting = [](IShipAPI& api)
             {
                 y_position[1] = i.y;
             }
-        }
+        }*/
         initialized = 1;
     }
     int distance = manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, x_position, y_position[cur_hole]);
-    if (distance<=1)
+    if (distance <= 1)
     {
         std::cout << "Inspecting:: 1\n";
+        /*
         if (distance>0)
         {
             std::cout << "Inspecting:: 2\n";
@@ -2313,80 +2509,35 @@ auto Inspecting = [](IShipAPI& api)
             }
 
             return false;
-        }
+        }*/
         std::cout << "Inspecting:: 4\n";
 
-        int holehp = api.GetWormholeHp(x_position - dir, y_position[cur_hole]);
-        if (holehp>0)
+        int holehp = api.GetWormholeHp(worm_x, y_position[cur_hole]);
+        std::cout << "Inspecting:: 5\n";
+        // 如果原本记录为关闭，则记录为打开，并报告
+        coordinate tmp(worm_x, y_position[cur_hole]);
+        if (holehp >= 12000 && MapInfo::fullmap[tmp.x][tmp.y] == MapInfo::ClosedWormhole)
         {
-            std::cout << "Inspecting:: 5\n";
-            // 如果原本记录为关闭，则记录为打开，并报告
-            coordinate tmp(x_position - dir, y_position[cur_hole]);
-            if (holehp >= 12000 && MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())
-            {
-                //for (auto const& i : MapInfo::PositionLists[MapInfo::ClosedWormhole])
-                for (auto i = MapInfo::PositionLists[MapInfo::ClosedWormhole].begin(); i != MapInfo::PositionLists[MapInfo::ClosedWormhole].end();)
-                {
-                    if (abs((*i).y-tmp.y)<2)
-                    {
-                        MapInfo::PositionLists[MapInfo::OpenWormhole].insert(*i);
-                        i = MapInfo::PositionLists[MapInfo::OpenWormhole].erase(i);
-                    }
-                    else
-                    {
-                        i++;
-                    }
-                }
-                //TODO：报告
-            }
-
-            //如果允许攻击，则攻击
-            if (holehp>1000&&ShipInfo::WhetherAttackWormhole)
-            {
-                std::cout << "Inspecting:: 6\n";
-                coordinate result = MyAttack(api, atan2(tmp.y * 1000 + 500 - ShipInfo::myself.me.y, tmp.x * 1000 + 500 - ShipInfo::myself.me.x), tmp);
-            }
-
-            if (holehp<950&&MapInfo::PositionLists[MapInfo::OpenWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::OpenWormhole].end())
-            {
-                for (auto const& i : MapInfo::PositionLists[MapInfo::OpenWormhole])
-                {
-                    std::cout << i.x << "," << i.y << "\n";
-                    if (abs(i.y - tmp.y) < 2)
-                    {
-                        MapInfo::PositionLists[MapInfo::ClosedWormhole].insert(i);
-                        i = MapInfo::PositionLists[MapInfo::OpenWormhole].erase(i);
-                    }
-                }
-            }
-
-            if (holehp < 950)
-            {
-                std::cout << "Inspecting:: 7\n";
-                cur_hole = (cur_hole + 1) % 3;
-            }
-            return false;
+            openWormhole(tmp);
+            //TODO：报告
         }
-        else
+        //如果允许攻击，则攻击
+        if (holehp>0&&ShipInfo::WhetherAttackWormhole)
         {
-            coordinate tmp(x_position - dir, y_position[cur_hole]);
-            if (MapInfo::PositionLists[MapInfo::OpenWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::OpenWormhole].end())
-            {
-                for (auto const& i : MapInfo::PositionLists[MapInfo::OpenWormhole])
-                {
-                    if (abs(i.y - tmp.y) < 2)
-                    {
-                        MapInfo::PositionLists[MapInfo::ClosedWormhole].insert(i);
-                        i = MapInfo::PositionLists[MapInfo::OpenWormhole].erase(i);
-                    }
-                }
-            }
+            std::cout << "Inspecting:: 6\n";
+            coordinate result = MyAttack(api, atan2(tmp.y * 1000 + 500 - ShipInfo::myself.me.y, tmp.x * 1000 + 500 - ShipInfo::myself.me.x), tmp);
+        }
+
+        if (holehp<12000 and MapInfo::fullmap[tmp.x][tmp.y] == MapInfo::OpenWormhole)
+        {
+            closeWormhole(tmp);
+        }
+
+        if (holehp <= 100)
+        {
             std::cout << "Inspecting:: 7\n";
             cur_hole = (cur_hole + 1) % 3;
         }
-
-
-
         return false;
 
     }
@@ -2517,6 +2668,7 @@ void AI::play(IShipAPI& api)
                     break;
             }
         }
+        cout << "Mode Changed to " << nextMode << endl;
         if (ShipInfo::ShipBuffer.with_param)
         {
             switch (ShipInfo::ShipBuffer.instruction)
