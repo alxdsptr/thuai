@@ -2658,7 +2658,7 @@ void AI::play(IShipAPI& api)
                             AttackMode::target.push(*(MapInfo::PositionLists[MapInfo::EnemyHome].begin()));
                             break;
                         default:
-                            AttackMode::target.push({32,10});
+                            AttackMode::target.push(ShipInfo::ShipBuffer.target);
                             break;
                     }
                     break;
@@ -2923,7 +2923,6 @@ bool init_root = false;
 BT::SequenceNode<ITeamAPI> root;
 
 
-
 void AI::play(ITeamAPI& api)  // 默认team playerID 为0
 {
 
@@ -2968,11 +2967,12 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     if (!init_root)
     {
         init_root = true;
+
         root = {
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_1,PRODUCE)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(HomeInfo::first_id, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipAvailable(3)}),
-            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, INSPECT, MODEPARAM_AttackHome)}),
+            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, ATTACK, MODEPARAM_AttackHome)}),
 
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipAvailable(3 - HomeInfo::first_id)}),
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, CONSTRUCT, MODEPARAM_ConstructFactory)}),
