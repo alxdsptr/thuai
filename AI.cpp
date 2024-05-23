@@ -100,16 +100,9 @@ struct coordinate
     {
     }
 
-    bool operator!=(coordinate& co)
+    bool operator!=(const coordinate& co) const
     {
-        if (x==co.x&&y==co.y)
-        {
-            return true;
-        }
-        else
-        {
-            return false;
-        }
+        return !(*this == co);
     }
 };
 struct PointHash
@@ -488,7 +481,7 @@ double euclidean_distance(coordinate x, coordinate y)
 {
     return sqrt((x.x - y.x) * (x.x - y.x) + (x.y - y.y) * (x.y - y.y));
 }
-double WeaponDis[6] = {0, 4000, 4000, 4000, 8000, 8000};
+double WeaponDis[6] = {0, 4000, 4000, 4000, 6000, 6000};
 double WeaponToDis(THUAI7::WeaponType p)
 {
     return WeaponDis[(int)p];
@@ -524,7 +517,7 @@ inline coordinate MyAttack(IShipAPI& api, double angle, coordinate target)
 
     auto judge_ok = [&]() {
         bool ok = true;
-        for (double i = 400; i < fulldistance && ok; i += 400)
+        for (double i = 400; i < fulldistance and ok; i += 400)
         {
             double x1 = x + cos(angle) * i;
             double y1 = y + sin(angle) * i;
@@ -2261,7 +2254,7 @@ auto Inspecting = [](IShipAPI& api)
         }
         for (auto const& i : MapInfo::PositionLists[MapInfo::OpenWormhole])
         {
-            if ((i.x+dir-x_position)*dir>0)
+            if ((i.x + dir - x_position) * dir>0)
             {
                 x_position = i.x + dir;
             }
@@ -2302,13 +2295,17 @@ auto Inspecting = [](IShipAPI& api)
             coordinate tmp(x_position - dir, y_position[cur_hole]);
             if (holehp >= 12000 && MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())
             {
-                for (auto const& i : MapInfo::PositionLists[MapInfo::ClosedWormhole])
+                //for (auto const& i : MapInfo::PositionLists[MapInfo::ClosedWormhole])
+                for (auto i = MapInfo::PositionLists[MapInfo::ClosedWormhole].begin(); i != MapInfo::PositionLists[MapInfo::ClosedWormhole].end();)
                 {
-                    if (abs(i.y-tmp.y)<2)
+                    if (abs((*i).y-tmp.y)<2)
                     {
-                        MapInfo::PositionLists[MapInfo::OpenWormhole].insert(i);
-                        coordinate del = i;
-                        MapInfo::PositionLists[MapInfo::ClosedWormhole].erase(del);
+                        MapInfo::PositionLists[MapInfo::OpenWormhole].insert(*i);
+                        i = MapInfo::PositionLists[MapInfo::OpenWormhole].erase(i);
+                    }
+                    else
+                    {
+                        i++;
                     }
                 }
                 //TODO：报告
@@ -2327,8 +2324,7 @@ auto Inspecting = [](IShipAPI& api)
                     if (abs(i.y - tmp.y) < 2)
                     {
                         MapInfo::PositionLists[MapInfo::ClosedWormhole].insert(i);
-                        coordinate del = i;
-                        MapInfo::PositionLists[MapInfo::OpenWormhole].erase(del);
+                        i = MapInfo::PositionLists[MapInfo::OpenWormhole].erase(i);
                     }
                 }
             }
@@ -2344,8 +2340,7 @@ auto Inspecting = [](IShipAPI& api)
                     if (abs(i.y - tmp.y) < 2)
                     {
                         MapInfo::PositionLists[MapInfo::ClosedWormhole].insert(i);
-                        coordinate del = i;
-                        MapInfo::PositionLists[MapInfo::OpenWormhole].erase(del);
+                        i = MapInfo::PositionLists[MapInfo::OpenWormhole].erase(i);
                     }
                 }
             }
