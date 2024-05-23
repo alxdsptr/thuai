@@ -40,10 +40,11 @@ extern const bool asynchronous = false;
 
 
 #define Instruction_RefreshResource (1)
-#define Instruction_RefreshConstruction (1<<1)
-#define Instruction_AttackState (1<<2)
-
-#define Instruction_Inspecting (4)
+#define Instruction_RefreshConstruction (2)
+#define Instruction_AttackState (3)
+//#define Instruction_Inspecting (4)
+#define WormholeDestroyed (4)
+#define WormholeOpen (5)
 
 #define Parameter_ResourceRunningOut (1)
 #define Parameter_ConstructionBuildUp (1)
@@ -167,7 +168,7 @@ namespace Commute
     struct Buffer
     {
         ShipMode Mode = IDLE;
-        unsigned char ModeParam;
+        char ModeParam;
         bool with_target;
         coordinate target;
         bool with_param = false;
@@ -239,6 +240,7 @@ namespace MapInfo
     * @brief 储存各类型格子的坐标的向量，其中资源只有在可能有剩余量的时候才会储存在其中
     */
     std::unordered_set<coordinate, PointHash> PositionLists[11];
+    std::unordered_set<coordinate, PointHash> myResource, enemyResource, myConstruction, enemyConstruction;
 
     std::unordered_set<coordinate, PointHash> Ori_PositionLists[11];
 
@@ -285,8 +287,16 @@ namespace MapInfo
             case THUAI7::PlaceType::Asteroid:
                 return Asteroid;
             case THUAI7::PlaceType::Resource:
+                if ((x < 25 and MySide == RED) or (x > 25 and MySide == BLUE))
+                    myResource.insert(coordinate(x, y));
+                else
+                    enemyResource.insert(coordinate(x, y));
                 return Resource;
             case THUAI7::PlaceType::Construction:
+                if ((x < 25 and MySide == RED) or (x > 25 and MySide == BLUE))
+                    myConstruction.insert(coordinate(x, y));
+                else
+                    enemyConstruction.insert(coordinate(x, y));
                 return Construction;
             case THUAI7::PlaceType::Wormhole:
                 if(y <= 15){
@@ -1384,14 +1394,19 @@ namespace Commute
                 HomeInfo::TeamShipBuffer[mes.first].Mode = IDLE;
                 continue;
             }
-            if (temp.instruction == Instruction_RefreshResource and temp.param == Parameter_ResourceRunningOut)
+            else if (temp.instruction == Instruction_RefreshResource and temp.param == Parameter_ResourceRunningOut)
             {
                 MapInfo::PositionLists[MapInfo::Resource].erase(temp.param_pos);
-                if (MapInfo::PositionLists[MapInfo::Resource].empty())
+                MapInfo::myResource.erase(temp.param_pos);
+                MapInfo::enemyResource.erase(temp.param_pos);
+                //if (MapInfo::PositionLists[MapInfo::Resource].empty())
+                if (MapInfo::myResource.empty())
                 {
-                    HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[0]].Mode = CONSTRUCT;
+                    //HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[0]].Mode = CONSTRUCT;
+                    HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[0]].ModeParam = 0;
                 }
             }
+            //else if (temp.instruction == Instruction_RefreshConstruction and temp.param == Parameter_ConstructionBuildUp)
             reports_to_send.push_back(temp);
         }
     }
@@ -1952,6 +1967,7 @@ namespace IdleMode
 namespace ConstructMode
 {
     coordinate target = {-1, -1};
+    bool side = true;
 
     /*
     bool GetNearestConstruction(IShipAPI& api)
@@ -2009,6 +2025,8 @@ namespace ConstructMode
             {
                 std::cout << "enemy construction" << std::endl;
                 MapInfo::PositionLists[MapInfo::Construction].erase(target);
+                MapInfo::myConstruction.erase(ShipInfo::ShipBuffer.param_pos);
+                MapInfo::enemyConstruction.erase(ShipInfo::ShipBuffer.param_pos);
                 //TODO! 通知军舰攻击建筑
                 Commute::report(api, Instruction_RefreshConstruction, Parameter_EnemyBuildConstruction, target);
                 target = {-1, -1};
@@ -2018,6 +2036,8 @@ namespace ConstructMode
             {
                 std::cout << "full hp construction" << std::endl;
                 MapInfo::PositionLists[MapInfo::Construction].erase(target);
+                MapInfo::myConstruction.erase(ShipInfo::ShipBuffer.param_pos);
+                MapInfo::enemyConstruction.erase(ShipInfo::ShipBuffer.param_pos);
                 Commute::report(api, Instruction_RefreshConstruction, Parameter_ConstructionBuildUp, target);
                 target = {-1, -1};
                 return true;
@@ -2037,7 +2057,7 @@ namespace ConstructMode
             //if (!GetNearestConstruction(api))
             //    return false;
             std::cout << "Triggered RoadSearch,target:" << target.x << "," << target.y << "\n";
-            auto search = std::make_shared<RoadSearchRange>(target, MapInfo::PositionLists[MapInfo::Construction], near_enough);
+            auto search = std::make_shared<RoadSearchRange>(target, side ? MapInfo::myConstruction : MapInfo::enemyConstruction, near_enough);
             int priority = PRIORITY_Normal * RATIO + callStack.size();
             callStack.push({*search, RoadSearchID, priority});
         }
@@ -2049,7 +2069,7 @@ namespace ProduceMode
 {
 
     coordinate target = {-1, -1};
-
+    bool side = true;
     /*
     bool GetNearestResource(IShipAPI& api)
     {
@@ -2095,6 +2115,10 @@ namespace ProduceMode
             else
             {
                 MapInfo::PositionLists[MapInfo::Resource].erase(target);
+                if (side)
+                    MapInfo::myResource.erase(target);
+                else
+                    MapInfo::enemyResource.erase(target);
                 Commute::report(api, Instruction_RefreshResource, Parameter_ResourceRunningOut, target);
                 target = {-1, -1};
                 return true;
@@ -2109,7 +2133,7 @@ namespace ProduceMode
             }*/
             std::cout << "Triggered RoadSearch,target:" << target.x << "," << target.y << "\n";
 
-            auto search = std::make_shared<RoadSearchRange>(target, MapInfo::PositionLists[MapInfo::Resource], near_enough);
+            auto search = std::make_shared<RoadSearchRange>(target, side ? MapInfo::myResource : MapInfo::enemyResource, near_enough);
             int priority = PRIORITY_Normal * RATIO + callStack.size();
             callStack.push({*search, RoadSearchID, priority});
 
@@ -2519,7 +2543,7 @@ auto Inspecting = [](IShipAPI& api)
         if (holehp >= 12000 && MapInfo::fullmap[tmp.x][tmp.y] == MapInfo::ClosedWormhole)
         {
             openWormhole(tmp);
-            //TODO：报告
+            Commute::report(api, WormholeOpen, 0, tmp);
         }
         //如果允许攻击，则攻击
         if (holehp>0&&ShipInfo::WhetherAttackWormhole)
@@ -2531,6 +2555,7 @@ auto Inspecting = [](IShipAPI& api)
         if (holehp<12000 and MapInfo::fullmap[tmp.x][tmp.y] == MapInfo::OpenWormhole)
         {
             closeWormhole(tmp);
+            Commute::report(api, WormholeDestroyed, 0, tmp);
         }
 
         if (holehp <= 100)
@@ -2624,14 +2649,14 @@ void AI::play(IShipAPI& api)
             switch (ShipInfo::ShipBuffer.Mode)
             {
                 case PRODUCE:
+                    ProduceMode::side = ShipInfo::ShipBuffer.ModeParam;
                     if (ShipInfo::ShipBuffer.with_target)
                     {
                         ProduceMode::target = ShipInfo::ShipBuffer.target;
-                        
                     }
                     break;
                 case CONSTRUCT:
-                    nextMode = ShipInfo::myself.mode = CONSTRUCT;
+                    ConstructMode::side = ShipInfo::ShipBuffer.ModeParam >= 0;
                     if (ShipInfo::ShipBuffer.with_target)
                     {
                         ConstructMode::target = ShipInfo::ShipBuffer.target;
@@ -2678,6 +2703,8 @@ void AI::play(IShipAPI& api)
                     {
                         case Parameter_ResourceRunningOut:
                             MapInfo::PositionLists[MapInfo::Resource].erase(ShipInfo::ShipBuffer.param_pos);
+                            MapInfo::myResource.erase(ShipInfo::ShipBuffer.param_pos);
+                            MapInfo::enemyResource.erase(ShipInfo::ShipBuffer.param_pos);
                             break;
                         default:
                             break;
@@ -2688,6 +2715,8 @@ void AI::play(IShipAPI& api)
                     {
                         case Parameter_ConstructionBuildUp:
                             MapInfo::PositionLists[MapInfo::Construction].erase(ShipInfo::ShipBuffer.param_pos);
+                            MapInfo::myConstruction.erase(ShipInfo::ShipBuffer.param_pos);
+                            MapInfo::enemyConstruction.erase(ShipInfo::ShipBuffer.param_pos);
                             break;
                         case Parameter_EnemyBuildConstruction:
                             if (ShipInfo::myself.me.playerID >= 3)
@@ -2697,13 +2726,23 @@ void AI::play(IShipAPI& api)
                             break;
                         case Parameter_DestroyedEnemyConstruction:
                             MapInfo::PositionLists[MapInfo::Construction].insert(ShipInfo::ShipBuffer.param_pos);
+                            MapInfo::myConstruction.insert(ShipInfo::ShipBuffer.param_pos);
+                            MapInfo::enemyConstruction.insert(ShipInfo::ShipBuffer.param_pos);
                             break;
                         case Parameter_DestroyedFriendConstruction:
                             MapInfo::PositionLists[MapInfo::Construction].insert(ShipInfo::ShipBuffer.param_pos);
+                            MapInfo::myConstruction.insert(ShipInfo::ShipBuffer.param_pos);
+                            MapInfo::enemyConstruction.insert(ShipInfo::ShipBuffer.param_pos);
                             break;
                         default:
                             break;
                     }
+                    break;
+                case WormholeDestroyed:
+                    closeWormhole(ShipInfo::ShipBuffer.param_pos);
+                    break;
+                case WormholeOpen:
+                    openWormhole(ShipInfo::ShipBuffer.param_pos);
                     break;
                 default:
                     break;
@@ -2969,10 +3008,11 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
         init_root = true;
 
         root = {
-    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_1,PRODUCE)}),
+    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_1,PRODUCE, 1)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(HomeInfo::first_id, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipAvailable(3)}),
-            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, ATTACK, MODEPARAM_AttackHome)}),
+//            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, ATTACK, MODEPARAM_AttackHome)}),
+            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, INSPECT, MODEPARAM_AttackHome)}), 
 
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipAvailable(3 - HomeInfo::first_id)}),
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, CONSTRUCT, MODEPARAM_ConstructFactory)}),
