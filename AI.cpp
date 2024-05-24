@@ -17,6 +17,7 @@ using std::cout, std::endl;
 // 为假则play()期间确保游戏状态不更新，为真则只保证游戏状态在调用相关方法时不更新，大致一帧更新一次
 extern const bool asynchronous = false;
 bool counterAttackMode = false;
+bool finishedProduce = false;
 #ifndef PI
 #define PI 3.14159265358979323846
 #endif  // !PI
@@ -2661,6 +2662,7 @@ namespace Commute
                 {
                     // HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[0]].Mode = CONSTRUCT;
                     HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[0]].ModeParam = 0;
+                    finishedProduce = true;
                 }
             }
             else if (temp.instruction == Instruction_RefreshConstruction)
@@ -2855,11 +2857,29 @@ inline unsigned char Conquerable(THUAI7::Ship & enemy)
 
 
 }
+int getFullHP(THUAI7::ShipType type)
+{
+    switch (type)
+    {
+		case THUAI7::ShipType::CivilianShip:
+			return 3000;
+			break;
+		case THUAI7::ShipType::MilitaryShip:
+			return 4000;
+			break;
+        case THUAI7::ShipType::FlagShip:
+			return 12000;
+			break;
+		default:
+			return 0;
+			break;
+	}
+}
 
 auto MyRecovery = [] (IShipAPI & api)
 {
     std::cout << "Enter RecoveryMode\n";
-    int fullHp = ((ShipInfo::myself.me.shipType == THUAI7::ShipType::CivilianShip) ? (3000) : ((ShipInfo::myself.me.shipType == THUAI7::ShipType::MilitaryShip) ? 4000 : 12000));
+    int fullHp = getFullHP(ShipInfo::myself.me.shipType);
     if (ShipInfo::myself.me.hp >= fullHp-1)
     {
         
@@ -3618,24 +3638,29 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     }
     root.perform(api);
 
-        auto f = api.GetGameInfo();
-        auto res = f.get();
-        cout << "redScore:" << res->redScore << " blueScore:" << res->blueScore << endl;
+        //auto f = api.GetGameInfo();
+        //auto res = f.get();
+        //cout << "redScore:" << res->redScore << " blueScore:" << res->blueScore << endl;
     if (frame_cnt > 1800)
     {
         for (auto const& i : HomeInfo::MyShips)
         {
-            if (i.armor == 0 and api.GetEnergy() > 20000)
+            int fullHP = getFullHP(i.shipType);
+            if (i.hp < fullHP / 2)
             {
-                api.InstallModule(i.playerID, THUAI7::ModuleType::ModuleArmor1);
-            }
-            if (i.shield == 0 and api.GetEnergy() > 20000)
-            {
-                api.InstallModule(i.playerID, THUAI7::ModuleType::ModuleShield1);
+                if(i.armor == 0 and api.GetEnergy() > 100000)
+                {
+                    api.InstallModule(i.playerID, THUAI7::ModuleType::ModuleArmor1);
+                }
+                if (i.shield == 0 and api.GetEnergy() > 100000)
+                {
+                    api.InstallModule(i.playerID, THUAI7::ModuleType::ModuleShield1);
+                }
             }
         }
     }
-    if (frame_cnt == 3600)
+    /*
+    if (frame_cnt == 7200)
     {
         auto f = api.GetGameInfo();
         auto res = f.get();
@@ -3653,6 +3678,15 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
             HomeInfo::TeamShipBuffer[i].Mode = REPAIR;
         }
         }
+    }*/
+    if (finishedProduce)
+    {
+        counterAttackMode = true;
+        for (int i = 1; i <= 4; i++)
+        {
+            HomeInfo::TeamShipBuffer[i].Mode = REPAIR;
+        }
+        finishedProduce = false;
     }
     Commute::sync_ships(api);
     if (counterAttackMode and wormholeRepaired)
@@ -3661,6 +3695,7 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
         {
             setCounterAttack(counterAttackID[i]);
         }
+        HomeInfo::TeamShipBuffer[3].Mode = INSPECT;
         Commute::sync_ships(api);
     }
 }
