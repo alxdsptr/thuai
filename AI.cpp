@@ -67,11 +67,11 @@ extern const bool asynchronous = false;
 #define RATIO 1000
 
 #define PRIORITY_Inspection (0.5)
-#define PRIORITY_Recovery (4)
+#define PRIORITY_Recovery (20)
 #define PRIORITY_ReturnHome (3)
-#define PRIORITY_Dodge (2)
+#define PRIORITY_Dodge (15)
 #define PRIORITY_Normal (0)
-#define PRIORITY_Highest (10)
+#define PRIORITY_Help (10)
 
 // 选手需要依次将player1到player4的船类型在这里定义
 extern const std::array<THUAI7::ShipType, 4> ShipTypeDict = {
@@ -2921,7 +2921,7 @@ void AI::play(IShipAPI& api)
                         {
                             auto search = std::make_shared<RoadSearch>(ShipInfo::ShipBuffer.param_pos, [](IShipAPI& api)
                                                                        { return false; });
-                            int priority = PRIORITY_Highest * RATIO + callStack.size();
+                            int priority = PRIORITY_Help * RATIO + callStack.size();
                             callStack.push({*search, RoadSearchID, priority});
                             interrupt_codeRecorder.insert(HelpID);
                         }
