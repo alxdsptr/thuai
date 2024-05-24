@@ -16,6 +16,7 @@ using std::cout, std::endl;
 // 注意不要使用conio.h，Windows.h等非标准库
 // 为假则play()期间确保游戏状态不更新，为真则只保证游戏状态在调用相关方法时不更新，大致一帧更新一次
 extern const bool asynchronous = false;
+bool counterAttackMode = false;
 #ifndef PI
 #define PI 3.14159265358979323846
 #endif  // !PI
@@ -54,6 +55,8 @@ extern const bool asynchronous = false;
 #define Instruction_UnsetcounterAttack (7)
 #define Instruction_Help (8)
 #define Instruction_CounterAttackOK (9)
+#define Instruction_RepairWormhole (10)
+#define WormholeRepaired (11)
 
 #define Parameter_ResourceRunningOut (1)
 #define Parameter_ConstructionBuildUp (1)
@@ -69,6 +72,7 @@ extern const bool asynchronous = false;
 #define RecoveryID 4
 #define InspectID 5
 #define HelpID 6
+#define CounterAttackID 7
 
 #define RATIO 1000
 
@@ -80,12 +84,15 @@ extern const bool asynchronous = false;
 #define PRIORITY_Help (10)
 #define PRIORITY_Counter_Attack (2)
 
+//#define ModeCounterAttack (100)
+
+bool wormholeRepaired = false;
 // 选手需要依次将player1到player4的船类型在这里定义
 extern const std::array<THUAI7::ShipType, 4> ShipTypeDict = {
     THUAI7::ShipType::CivilianShip,
     THUAI7::ShipType::CivilianShip,
     THUAI7::ShipType::MilitaryShip,
-    THUAI7::ShipType::MilitaryShip,
+    THUAI7::ShipType::FlagShip,
 };
  
 // 可以在AI.cpp内部声明变量与函数
@@ -154,8 +161,10 @@ enum ShipMode
     ROB,
     RUIN,
     FOLLOW,
-    INSPECT
+    INSPECT,
+    REPAIR
 };
+ShipMode nextMode=IDLE;
 
 /**
  * @brief 为舰船行为函数提供返回值模板
@@ -174,6 +183,7 @@ struct ModeRetval
 /**
 * 命名空间声明
 */
+inline int manhatten_distance(int x1, int y1, coordinate c);
 
 namespace Commute
 {
@@ -199,7 +209,9 @@ namespace Commute
     constexpr size_t BUFFER_SIZE = sizeof(Commute::Buffer);
     constexpr size_t REPORTBUFFER_SIZE = sizeof(Commute::ReportBuffer);
     using bytePointer = unsigned char*;
-}
+    void report(IShipAPI& api, unsigned char instruc, unsigned char param, coordinate target);
+    void report(IShipAPI& api, unsigned char instruc, unsigned char param);
+}  // namespace Commute
 namespace HomeInfo
 {
 
@@ -212,7 +224,7 @@ namespace HomeInfo
     int EnemyGain = 0;
     Side MySide = RED;
 
-    coordinate MyHomePos, EnemyHomePos;
+    //coordinate MyHomePos, EnemyHomePos;
 
     // 为什么不用shared_ptr<const THUAI7::Ship>?
     std::vector<THUAI7::Ship> EnemyShips, EnemyShipsInSight;
@@ -254,6 +266,7 @@ namespace MapInfo
     std::unordered_set<coordinate, PointHash> PositionLists[11];
     std::unordered_set<coordinate, PointHash> resource[2], construction[2];
     std::vector<coordinate> myResAndCons, enemyResAndCons;
+    int counter_index = 0;
 
     std::unordered_set<coordinate, PointHash> Ori_PositionLists[11];
 
@@ -294,9 +307,15 @@ namespace MapInfo
                 return NullPlaceType;
             case THUAI7::PlaceType::Home:
                 if ((x < 10 and MySide == RED) or (x >= 40 and MySide == BLUE))
+                {
+                    home_pos = {x, y};
 					return MyHome;
-				else
+                }
+                else
+                {
+                    enemy_pos = {x, y};
 					return EnemyHome;
+                }
             case THUAI7::PlaceType::Space:
                 return Space;
             case THUAI7::PlaceType::Ruin:
@@ -337,12 +356,28 @@ namespace MapInfo
             return 2;
     }
     int resource_cnt;
+    void sortEnemy()
+    {
+        coordinate start_point = MySide == RED ? coordinate{27, 38} : coordinate{22, 11};
+        auto cmp = [&start_point](const coordinate& a, const coordinate& b) {
+            return manhatten_distance(a.x, a.y, start_point) < manhatten_distance(b.x, b.y, start_point);
+		};
+        std::sort(enemyResAndCons.begin(), enemyResAndCons.end(), cmp);
+    }
     template<class T>
     void LoadFullMap(T& api)
     {
         auto mp = api.GetFullMap();
         auto self = api.GetSelfInfo();
-        self->teamID == 0 ? MySide = RED : MySide = BLUE;
+        if (self->teamID == 0)
+        {
+            MySide = RED;
+        }
+        else
+        {
+            MySide = BLUE;
+        }
+            
         for (size_t i = 0; i < 50; i++)
         {
             for (size_t j = 0; j < 50; j++)
@@ -371,6 +406,7 @@ namespace MapInfo
         {
             enemyResAndCons.push_back(p);
         }
+        sortEnemy();
         //#ifdef DEBUG
 //        for(int i = 0; i < 3; i++){
 //            std::cout << "Wormhole " << i << " : " << std::endl;
@@ -1379,108 +1415,6 @@ namespace HomeInfo
 
 
 
-namespace Commute
-{
-    bool RefreshInfo(IShipAPI& api)
-    {
-        if (!api.HaveMessage())
-        {
-            return false;
-        }
-        else
-        {
-            std::string mes = (api.GetMessage()).second;
-            memcpy(&ShipInfo::ShipBuffer, mes.data(), sizeof(Buffer));
-            return true;
-        }
-    }
-    void sync_ships(ITeamAPI& api)
-    {
-        //for (size_t i = 0; i < HomeInfo::MyShips.size(); i++)
-        for (auto const& ship : HomeInfo::MyShips)
-        {
-            int index = ship.playerID;
-            if (!HomeInfo::UsableShip[index])
-            {
-				continue;
-			}
-            std::string message;
-            message.resize(BUFFER_SIZE + 1);
-            memcpy(message.data(), &HomeInfo::TeamShipBuffer[index], BUFFER_SIZE);
-            api.SendBinaryMessage(index, message);
-        }
-    }
-    void report(IShipAPI& api, unsigned char instruc, unsigned char param, coordinate target = {-1, -1})
-    {
-        ShipInfo::ReportBuffer = {instruc, param, target};
-        std::string message;
-        message.resize(REPORTBUFFER_SIZE + 1);
-        memcpy(message.data(), &ShipInfo::ReportBuffer, REPORTBUFFER_SIZE);
-        api.SendBinaryMessage(0, message);
-    }
-    std::deque<ReportBuffer> reports_to_send;
-    //std::deque<int> report_ids;
-    void set_report(ReportBuffer& report)
-    {
-        for (size_t i = 0; i < 4; i++)
-        {
-			HomeInfo::TeamShipBuffer[i].with_param = true;
-			HomeInfo::TeamShipBuffer[i].instruction = report.instruction;
-			HomeInfo::TeamShipBuffer[i].param = report.param;
-			HomeInfo::TeamShipBuffer[i].param_pos = report.param_pos;
-		}
-    }
-    void receive_message(ITeamAPI& api)
-    {
-        while (api.HaveMessage())
-        {
-            auto mes = api.GetMessage();
-            std::string message = mes.second;
-            Commute::ReportBuffer temp;
-            memcpy(&temp, message.data(), REPORTBUFFER_SIZE);
-            if (temp.instruction == Instruction_AttackState and temp.param == Parameter_AttackSuccess)
-            {
-                HomeInfo::TeamShipBuffer[mes.first].Mode = IDLE;
-                continue;
-            }
-            else if (temp.instruction == Instruction_RefreshResource and temp.param == Parameter_ResourceRunningOut)
-            {
-                MapInfo::eraseResource(temp.param_pos);
-                //if (MapInfo::PositionLists[MapInfo::Resource].empty())
-                if (MapInfo::resource[1].empty())
-                {
-                    //HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[0]].Mode = CONSTRUCT;
-                    HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[0]].ModeParam = 0;
-                }
-            }
-            else if (temp.instruction == Instruction_RefreshConstruction)
-            {
-                if (temp.param == Parameter_ConstructionBuildUp)
-                {
-                    MapInfo::eraseConstruction(temp.param_pos);
-                    if (MapInfo::construction[1].empty())
-                    {
-						HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[0]].Mode = PRODUCE;
-						HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[0]].ModeParam = 1;
-					}
-                }
-            }
-            //else if (temp.instruction == Instruction_Help)
-            //{
-
-            //}
-            reports_to_send.push_back(temp);
-        }
-    }
-    void process_message()
-    {
-        if (!reports_to_send.empty())
-        {
-            set_report(reports_to_send.front());
-            reports_to_send.pop_front();
-        }
-    }
-}
 
 
 
@@ -1792,6 +1726,10 @@ public:
             if (target.x == -1)
             {
                 path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, des, api);
+                if (path.empty())
+                {
+                    return true;
+                }
                 target = path.back();
             }
             else
@@ -1801,6 +1739,10 @@ public:
                     return true;
                 }
                 path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, des, api);
+                if (path.empty())
+                {
+                    return true;
+                }
                 target = path.back();
             }
         }
@@ -1864,6 +1806,10 @@ public:
             else if (!temp.empty() or euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, path.front().x * 1000 + 500, path.front().y * 1000 + 500) > 1500)
             {
                 path = search_road(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, des, api);
+                if (path.empty())
+                {
+                    return true;
+                }
                 target = path.back();
                 for (const auto& i : temp)
                 {
@@ -2202,7 +2148,46 @@ namespace ProduceMode
     {
 
     }
-}
+}  // namespace ProduceMode
+namespace RepairMode
+{
+
+    coordinate target;
+    auto near_enough = [](IShipAPI& api)
+    {
+        return (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, target.x, target.y) <= 1);
+    };
+
+    bool Perform(IShipAPI& api)
+    {
+//        if (ShipInfo::myself.me.shipState == THUAI7::ShipState::Constructing)
+ //       {
+  //          return false;
+   //     }
+        if (near_enough(api))
+        {
+            if (api.GetWormholeHp(target.x, target.y) < 20000)
+            {
+                api.RepairWormhole();
+            }
+            else
+            {
+                Commute::report(api, WormholeRepaired, 0, target);
+                Commute::report(api, WormholeOpen, 0, target);
+                target = {-1, -1};
+                return true;
+            }
+        }
+        else
+        {
+
+            auto search = std::make_shared<RoadSearch>(target, near_enough);
+            int priority = PRIORITY_Normal * RATIO + callStack.size();
+            callStack.push({*search, RoadSearchID, priority});
+        }
+        return false;
+    }
+}  // namespace ProduceModep
 
 namespace AttackMode
 {
@@ -2316,9 +2301,417 @@ namespace AttackMode
 
 //ModeRetval (*perform_list[3])(IShipAPI&) = {&(IdleMode::Perform), &(RoadSearchMode::Perform), &(ProduceMode::Perform)};
 //void (*clear_list[3])(IShipAPI&) = {&(IdleMode::Clear), &(RoadSearchMode::Clear), &(ProduceMode::Clear)};
+coordinate counterattack_target(-1, -1);
+coordinate counterattack_oldtarget(-1, -1);
+
+    /**
+ * @brief 反攻阶段代码
+ * 优先级：1.5
+ */
+auto CounterAttacking = [](IShipAPI& api) {
+
+    if (counterattack_target.x==-1)
+    {
+        return false;
+    }
+    if (counterattack_oldtarget==counterattack_target)
+    {
+        return false;
+    }
+
+    if (euclidean_distance(ShipInfo::myself.me.x/1000,ShipInfo::myself.me.y/1000,counterattack_target.x,counterattack_target.y)>2)
+    {
+        if (ShipInfo::myself.me.playerID <= 2)
+        {
+            auto search = std::make_shared<RoadSearch>(counterattack_target, [](IShipAPI& api)
+                                                       { return (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, counterattack_target.x, counterattack_target.y) <= 1); });
+            int priority = PRIORITY_Counter_Attack * RATIO + callStack.size();
+            callStack.push({*search, RoadSearchID, priority});
+        }
+        else
+        {
+            auto search = std::make_shared<RoadSearch>(counterattack_target, [](IShipAPI& api)
+                                                       { return (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, counterattack_target.x, counterattack_target.y) <= 2); });
+            int priority = PRIORITY_Counter_Attack * RATIO + callStack.size();
+            callStack.push({*search, RoadSearchID, priority});
+        }
+        return false;
+    }
+    else
+    {
+        if (ShipInfo::myself.me.playerID<=2)
+        {
+            MapInfo::Place this_place = MapInfo::fullmap[counterattack_target.x][counterattack_target.y];
+            if (this_place == MapInfo::Resource)
+            {
+                if (api.GetResourceState(counterattack_target.x, counterattack_target.y) > 0)
+                {
+                    api.Produce();
+                }
+                else
+                {
+                    Commute::report(api, Instruction_CounterAttackOK, 0, counterattack_target);
+                    counterattack_oldtarget = counterattack_target;
+                }
+            }
+            else
+            {
+                auto res = api.GetConstructionState(counterattack_target.x, counterattack_target.y);
+                if (res.has_value())
+                {
+                    if (res.value().teamID==ShipInfo::myself.me.teamID)
+                    {
+                        auto type = res.value().constructionType;
+                        if (!ConstructionFullHp(res.value().hp, type))
+                        {
+                            api.Construct(type);
+                        }
+                        else
+                        {
+                            api.EndAllAction();
+                            Commute::report(api, Instruction_CounterAttackOK, 0, counterattack_target);
+                            counterattack_oldtarget = counterattack_target;
+                        }
+
+                    }
+                    else
+                    {
+                        if (res.value().hp > 0 and ShipInfo::myself.me.shipState != THUAI7::ShipState::Attacking and ShipInfo::myself.me.shipState != THUAI7::ShipState::Swinging)
+                        {
+                            api.Attack(atan2(counterattack_target.y * 1000 + 500 - ShipInfo::myself.me.y, counterattack_target.x * 1000 + 500 - ShipInfo::myself.me.x));
+                        }
+                        else
+                        {
+                            api.Construct(THUAI7::ConstructionType::Fort);
+                        }
+                    }
+                }
+                else
+                {
+                    api.Construct(THUAI7::ConstructionType::Factory);
+                }
+            }
+        }
+        else
+        {
+            MapInfo::Place this_place = MapInfo::fullmap[counterattack_target.x][counterattack_target.y];
+            if (this_place == MapInfo::Resource)
+            {
+            }
+            else
+            {
+                auto res = api.GetConstructionState(counterattack_target.x, counterattack_target.y);
+                if (res.has_value())
+                {
+                    if (res.value().teamID==ShipInfo::myself.me.teamID)
+                    {
+                        auto type = res.value().constructionType;
+                        if (!ConstructionFullHp(res.value().hp, type))
+                        {
+                            api.Construct(type);
+                        }
+                    }
+                    else
+                    {
+                        if (res.value().hp > 0 and ShipInfo::myself.me.shipState != THUAI7::ShipState::Attacking and ShipInfo::myself.me.shipState != THUAI7::ShipState::Swinging)
+                        {
+                            api.Attack(atan2(counterattack_target.y * 1000 + 500 - ShipInfo::myself.me.y, counterattack_target.x * 1000 + 500 - ShipInfo::myself.me.x));
+                        }
+                        else
+                        {
+                            api.Construct(THUAI7::ConstructionType::Fort);
+                        }
+                    }
+                }
+                else
+                {
+                    api.Construct(THUAI7::ConstructionType::Factory);
+                }
+            }
+        }
+    }
+
+    return false;
+};
+
+namespace Commute
+{
+    /*
+    bool RefreshInfo(IShipAPI& api)
+    {
+        if (!api.HaveMessage())
+        {
+            return false;
+        }
+        else
+        {
+            std::string mes = (api.GetMessage()).second;
+            memcpy(&ShipInfo::ShipBuffer, mes.data(), sizeof(Buffer));
+            return true;
+        }
+    }*/
+    void processInstruction(IShipAPI& api)
+    {
+        if (ShipInfo::ShipBuffer.with_param)
+        {
+            switch (ShipInfo::ShipBuffer.instruction)
+            {
+                case Instruction_RefreshResource:
+                    switch (ShipInfo::ShipBuffer.param)
+                    {
+                        case Parameter_ResourceRunningOut:
+                            MapInfo::eraseResource(ShipInfo::ShipBuffer.param_pos);
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                case Instruction_RefreshConstruction:
+                    switch (ShipInfo::ShipBuffer.param)
+                    {
+                        case Parameter_ConstructionBuildUp:
+                            MapInfo::eraseConstruction(ShipInfo::ShipBuffer.param_pos);
+                            break;
+                        case Parameter_EnemyBuildConstruction:
+                            if (ShipInfo::myself.me.playerID >= 3)
+                            {
+                                AttackMode::target.push(ShipInfo::ShipBuffer.param_pos);
+                            }
+                            break;
+                        case Parameter_DestroyedEnemyConstruction:
+                            MapInfo::insertConstruction(ShipInfo::ShipBuffer.param_pos);
+                            break;
+                        case Parameter_DestroyedFriendConstruction:
+                            MapInfo::insertConstruction(ShipInfo::ShipBuffer.param_pos);
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                case WormholeDestroyed:
+                    closeWormhole(ShipInfo::ShipBuffer.param_pos);
+                    break;
+                case WormholeOpen:
+                    openWormhole(ShipInfo::ShipBuffer.param_pos);
+                    break;
+                case Instruction_Help:
+                    if (ShipInfo::myself.me.weaponType != THUAI7::WeaponType::NullWeaponType)
+                    {
+                        if (interrupt_codeRecorder.find(HelpID) != interrupt_codeRecorder.end())
+                        {
+                            auto search = std::make_shared<RoadSearch>(ShipInfo::ShipBuffer.param_pos, [](IShipAPI& api)
+                                                                       { return false; });
+                            int priority = PRIORITY_Help * RATIO + callStack.size();
+                            callStack.push({*search, RoadSearchID, priority});
+                            interrupt_codeRecorder.insert(HelpID);
+                        }
+                    }
+                    break;
+                case Instruction_CounterAttack:
+                    ShipInfo::WhetherAttackWormhole = false;
+                    counterattack_target = ShipInfo::ShipBuffer.param_pos;
+                    if (interrupt_codeRecorder.find(CounterAttackID) != interrupt_codeRecorder.end())
+                    {
+                        interrupt_codeRecorder.insert(CounterAttackID);
+                        int priority = PRIORITY_Counter_Attack * RATIO + callStack.size();
+                        callStack.push({CounterAttacking, CounterAttackID, priority});
+                    }
+                default:
+                    break;
+            }
+        }
+    }
+    void processMode(IShipAPI& api)
+    {
+        if (ShipInfo::myself.mode != ShipInfo::ShipBuffer.Mode)
+        {
+            // clear(api);
+            nextMode = ShipInfo::myself.mode = ShipInfo::ShipBuffer.Mode;
+            switch (ShipInfo::ShipBuffer.Mode)
+            {
+                case PRODUCE:
+                    ProduceMode::side = ShipInfo::ShipBuffer.ModeParam;
+                    if (ShipInfo::ShipBuffer.with_target)
+                    {
+                        ProduceMode::target = ShipInfo::ShipBuffer.target;
+                    }
+                    break;
+                case CONSTRUCT:
+                    ConstructMode::side = ShipInfo::ShipBuffer.ModeParam >= 0;
+                    if (ShipInfo::ShipBuffer.with_target)
+                    {
+                        ConstructMode::target = ShipInfo::ShipBuffer.target;
+                    }
+                    if (ShipInfo::ShipBuffer.ModeParam < 0)
+                    {
+                        ConstructMode::side = 0;
+                        ShipInfo::ShipBuffer.ModeParam = -ShipInfo::ShipBuffer.ModeParam;
+                    }
+                    switch (ShipInfo::ShipBuffer.ModeParam)
+                    {
+                        case MODEPARAM_ConstructFactory:
+                            ShipInfo::constructType = THUAI7::ConstructionType::Factory;
+                            break;
+                        case MODEPARAM_ConstructFort:
+                            ShipInfo::constructType = THUAI7::ConstructionType::Fort;
+                            break;
+                        case MODEPARAM_ConstructCommunity:
+                            ShipInfo::constructType = THUAI7::ConstructionType::Community;
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
+                case ATTACK:
+                    switch (ShipInfo::ShipBuffer.ModeParam)
+                    {
+                        case MODEPARAM_AttackHome:
+                            AttackMode::target.push(*(MapInfo::PositionLists[MapInfo::EnemyHome].begin()));
+                            break;
+                        default:
+                            AttackMode::target.push(ShipInfo::ShipBuffer.target);
+                            break;
+                    }
+                    break;
+                case INSPECT:
+                    break;
+                case REPAIR:
+                    ShipInfo::WhetherAttackWormhole = false;
+                default:
+                    break;
+            }
+        }
+        cout << "Mode Changed to " << nextMode << endl;
+    }
+    void checkInfo(IShipAPI& api)
+    {
+        if (api.HaveMessage())
+        {
+            while (api.HaveMessage())
+            {
+                std::string mes = (api.GetMessage()).second;
+                memcpy(&ShipInfo::ShipBuffer, mes.data(), sizeof(Buffer));
+                processInstruction(api);
+            }
+            processMode(api);
+        }
+    }
+    void sync_ships(ITeamAPI& api)
+    {
+        // for (size_t i = 0; i < HomeInfo::MyShips.size(); i++)
+        for (auto const& ship : HomeInfo::MyShips)
+        {
+            int index = ship.playerID;
+            if (!HomeInfo::UsableShip[index])
+            {
+                continue;
+            }
+            std::string message;
+            message.resize(BUFFER_SIZE + 1);
+            memcpy(message.data(), &HomeInfo::TeamShipBuffer[index], BUFFER_SIZE);
+            api.SendBinaryMessage(index, message);
+        }
+    }
+    void report(IShipAPI& api, unsigned char instruc, unsigned char param)
+    {
+        ShipInfo::ReportBuffer = {instruc, param, {-1, -1}};
+        std::string message;
+        message.resize(REPORTBUFFER_SIZE + 1);
+        memcpy(message.data(), &ShipInfo::ReportBuffer, REPORTBUFFER_SIZE);
+        api.SendBinaryMessage(0, message);
+    }
+    void report(IShipAPI& api, unsigned char instruc, unsigned char param, coordinate target)
+    {
+        ShipInfo::ReportBuffer = {instruc, param, target};
+        std::string message;
+        message.resize(REPORTBUFFER_SIZE + 1);
+        memcpy(message.data(), &ShipInfo::ReportBuffer, REPORTBUFFER_SIZE);
+        api.SendBinaryMessage(0, message);
+    }
+    std::deque<ReportBuffer> reports_to_send;
+    // std::deque<int> report_ids;
+    void set_report(ReportBuffer& report)
+    {
+        for (size_t i = 0; i < 4; i++)
+        {
+            HomeInfo::TeamShipBuffer[i].with_param = true;
+            HomeInfo::TeamShipBuffer[i].instruction = report.instruction;
+            HomeInfo::TeamShipBuffer[i].param = report.param;
+            HomeInfo::TeamShipBuffer[i].param_pos = report.param_pos;
+        }
+    }
+    void receive_message(ITeamAPI& api)
+    {
+        while (api.HaveMessage())
+        {
+            auto mes = api.GetMessage();
+            std::string message = mes.second;
+            Commute::ReportBuffer temp;
+            memcpy(&temp, message.data(), REPORTBUFFER_SIZE);
+            if (temp.instruction == Instruction_AttackState and temp.param == Parameter_AttackSuccess)
+            {
+                HomeInfo::TeamShipBuffer[mes.first].Mode = IDLE;
+                continue;
+            }
+            else if (temp.instruction == Instruction_RefreshResource and temp.param == Parameter_ResourceRunningOut)
+            {
+                MapInfo::eraseResource(temp.param_pos);
+                // if (MapInfo::PositionLists[MapInfo::Resource].empty())
+                if (MapInfo::resource[1].empty())
+                {
+                    // HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[0]].Mode = CONSTRUCT;
+                    HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[0]].ModeParam = 0;
+                }
+            }
+            else if (temp.instruction == Instruction_RefreshConstruction)
+            {
+                if (temp.param == Parameter_ConstructionBuildUp)
+                {
+                    MapInfo::eraseConstruction(temp.param_pos);
+                    if (MapInfo::construction[1].empty())
+                    {
+                        HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[2]].Mode = PRODUCE;
+                        HomeInfo::TeamShipBuffer[HomeInfo::index_to_id[2]].ModeParam = 1;
+                    }
+                }
+            }
+            else if (temp.instruction == Instruction_CounterAttackOK)
+            {
+                if (MapInfo::counter_index == MapInfo::enemyResAndCons.size() - 1)
+                {
+                    counterAttackMode = false;
+                }
+                else if (temp.param_pos == MapInfo::enemyResAndCons[MapInfo::counter_index])
+                {
+                    MapInfo::counter_index++;
+                }
+            }
+            else if (temp.instruction == WormholeRepaired)
+            {
+                wormholeRepaired = true;
+            }
+            // else if (temp.instruction == Instruction_Help)
+            //{
+
+            //}
+            if (temp.instruction != Instruction_CounterAttackOK)
+            {
+                reports_to_send.push_back(temp);
+            }
+        }
+    }
+    void process_message()
+    {
+        if (!reports_to_send.empty())
+        {
+            set_report(reports_to_send.front());
+            reports_to_send.pop_front();
+        }
+    }
+}
 
 
-ShipMode nextMode=IDLE;
+
 
 bool ShipStep(IShipAPI &api);
 
@@ -2640,139 +3033,6 @@ auto Inspecting = [](IShipAPI& api)
 };
 
 
-coordinate counterattack_target(-1, -1);
-coordinate counterattack_oldtarget(-1, -1);
-
-    /**
- * @brief 反攻阶段代码
- * 优先级：1.5
- */
-auto CounterAttacking = [](IShipAPI& api) {
-
-    if (counterattack_target.x==-1)
-    {
-        return false;
-    }
-    if (counterattack_oldtarget==counterattack_target)
-    {
-        return false;
-    }
-
-    if (euclidean_distance(ShipInfo::myself.me.x/1000,ShipInfo::myself.me.y/1000,counterattack_target.x,counterattack_target.y)>2)
-    {
-        if (ShipInfo::myself.me.playerID <= 2)
-        {
-            auto search = std::make_shared<RoadSearch>(counterattack_target, [](IShipAPI& api)
-                                                       { return (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, counterattack_target.x, counterattack_target.y) <= 1); });
-            int priority = PRIORITY_Counter_Attack * RATIO + callStack.size();
-            callStack.push({*search, RoadSearchID, priority});
-        }
-        else
-        {
-            auto search = std::make_shared<RoadSearch>(counterattack_target, [](IShipAPI& api)
-                                                       { return (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, counterattack_target.x, counterattack_target.y) <= 2); });
-            int priority = PRIORITY_Counter_Attack * RATIO + callStack.size();
-            callStack.push({*search, RoadSearchID, priority});
-        }
-        return false;
-    }
-    else
-    {
-        if (ShipInfo::myself.me.playerID<=2)
-        {
-            MapInfo::Place this_place = MapInfo::fullmap[counterattack_target.x][counterattack_target.y];
-            if (this_place == MapInfo::Resource)
-            {
-                if (api.GetResourceState(counterattack_target.x, counterattack_target.y) > 0)
-                {
-                    api.Produce();
-                }
-                else
-                {
-                    Commute::report(api, Instruction_CounterAttackOK, 0, counterattack_target);
-                    counterattack_oldtarget = counterattack_target;
-                }
-            }
-            else
-            {
-                auto res = api.GetConstructionState(counterattack_target.x, counterattack_target.y);
-                if (res.has_value())
-                {
-                    if (res.value().teamID==ShipInfo::myself.me.teamID)
-                    {
-                        auto type = res.value().constructionType;
-                        if (!ConstructionFullHp(res.value().hp, type))
-                        {
-                            api.Construct(type);
-                        }
-                        else
-                        {
-                            api.EndAllAction();
-                            Commute::report(api, Instruction_CounterAttackOK, 0, counterattack_target);
-                            counterattack_oldtarget = counterattack_target;
-                        }
-
-                    }
-                    else
-                    {
-                        if (res.value().hp > 0 and ShipInfo::myself.me.shipState != THUAI7::ShipState::Attacking and ShipInfo::myself.me.shipState != THUAI7::ShipState::Swinging)
-                        {
-                            api.Attack(atan2(counterattack_target.y * 1000 + 500 - ShipInfo::myself.me.y, counterattack_target.x * 1000 + 500 - ShipInfo::myself.me.x));
-                        }
-                        else
-                        {
-                            api.Construct(THUAI7::ConstructionType::Fort);
-                        }
-                    }
-                }
-                else
-                {
-                    api.Construct(THUAI7::ConstructionType::Factory);
-                }
-            }
-        }
-        else
-        {
-            MapInfo::Place this_place = MapInfo::fullmap[counterattack_target.x][counterattack_target.y];
-            if (this_place == MapInfo::Resource)
-            {
-            }
-            else
-            {
-                auto res = api.GetConstructionState(counterattack_target.x, counterattack_target.y);
-                if (res.has_value())
-                {
-                    if (res.value().teamID==ShipInfo::myself.me.teamID)
-                    {
-                        auto type = res.value().constructionType;
-                        if (!ConstructionFullHp(res.value().hp, type))
-                        {
-                            api.Construct(type);
-                        }
-                    }
-                    else
-                    {
-                        if (res.value().hp > 0 and ShipInfo::myself.me.shipState != THUAI7::ShipState::Attacking and ShipInfo::myself.me.shipState != THUAI7::ShipState::Swinging)
-                        {
-                            api.Attack(atan2(counterattack_target.y * 1000 + 500 - ShipInfo::myself.me.y, counterattack_target.x * 1000 + 500 - ShipInfo::myself.me.x));
-                        }
-                        else
-                        {
-                            api.Construct(THUAI7::ConstructionType::Fort);
-                        }
-                    }
-                }
-                else
-                {
-                    api.Construct(THUAI7::ConstructionType::Factory);
-                }
-            }
-        }
-    }
-
-    return false;
-};
-
 
 
 /**
@@ -3026,126 +3286,9 @@ void AI::play(IShipAPI& api)
         callStack.push({&ShipStep, ShipStepID, 0});
         interrupt_codeRecorder.insert(0);
         Ship_Init = 0;
+        RepairMode::target  = MapInfo::MySide == RED ? coordinate(23, 39) : coordinate(26, 10);
     }
-    if (Commute::RefreshInfo(api))
-    {
-        if (ShipInfo::myself.mode!=ShipInfo::ShipBuffer.Mode)
-        {
-            //clear(api);
-            nextMode = ShipInfo::myself.mode = ShipInfo::ShipBuffer.Mode;
-            switch (ShipInfo::ShipBuffer.Mode)
-            {
-                case PRODUCE:
-                    ProduceMode::side = ShipInfo::ShipBuffer.ModeParam;
-                    if (ShipInfo::ShipBuffer.with_target)
-                    {
-                        ProduceMode::target = ShipInfo::ShipBuffer.target;
-                    }
-                    break;
-                case CONSTRUCT:
-                    ConstructMode::side = ShipInfo::ShipBuffer.ModeParam >= 0;
-                    if (ShipInfo::ShipBuffer.with_target)
-                    {
-                        ConstructMode::target = ShipInfo::ShipBuffer.target;
-                    }
-                    if (ShipInfo::ShipBuffer.ModeParam < 0)
-                    {
-                        ConstructMode::side = 0;
-                        ShipInfo::ShipBuffer.ModeParam = -ShipInfo::ShipBuffer.ModeParam;
-                    }
-                    switch (ShipInfo::ShipBuffer.ModeParam)
-                    {
-                        case MODEPARAM_ConstructFactory:
-                            ShipInfo::constructType = THUAI7::ConstructionType::Factory;
-                            break;
-                        case MODEPARAM_ConstructFort:
-                            ShipInfo::constructType = THUAI7::ConstructionType::Fort;
-                            break;
-                        case MODEPARAM_ConstructCommunity:
-                            ShipInfo::constructType = THUAI7::ConstructionType::Community;
-                            break;
-                        default:
-                            break;
-                    }
-                    break;
-                case ATTACK:
-                    switch (ShipInfo::ShipBuffer.ModeParam)
-                    {
-                        case MODEPARAM_AttackHome:
-                            AttackMode::target.push(*(MapInfo::PositionLists[MapInfo::EnemyHome].begin()));
-                            break;
-                        default:
-                            AttackMode::target.push(ShipInfo::ShipBuffer.target);
-                            break;
-                    }
-                    break;
-                case INSPECT:
-                    break;
-                default:
-                    break;
-            }
-        }
-        cout << "Mode Changed to " << nextMode << endl;
-        if (ShipInfo::ShipBuffer.with_param)
-        {
-            switch (ShipInfo::ShipBuffer.instruction)
-            {
-                case Instruction_RefreshResource:
-                    switch (ShipInfo::ShipBuffer.param)
-                    {
-                        case Parameter_ResourceRunningOut:
-                            MapInfo::eraseResource(ShipInfo::ShipBuffer.param_pos);
-                            break;
-                        default:
-                            break;
-                    }
-                    break;
-                case Instruction_RefreshConstruction:
-                    switch (ShipInfo::ShipBuffer.param)
-                    {
-                        case Parameter_ConstructionBuildUp:
-                            MapInfo::eraseConstruction(ShipInfo::ShipBuffer.param_pos);
-                            break;
-                        case Parameter_EnemyBuildConstruction:
-                            if (ShipInfo::myself.me.playerID >= 3)
-                            {
-                                AttackMode::target.push(ShipInfo::ShipBuffer.param_pos);
-                            }
-                            break;
-                        case Parameter_DestroyedEnemyConstruction:
-                            MapInfo::insertConstruction(ShipInfo::ShipBuffer.param_pos);
-                            break;
-                        case Parameter_DestroyedFriendConstruction:
-                            MapInfo::insertConstruction(ShipInfo::ShipBuffer.param_pos);
-                            break;
-                        default:
-                            break;
-                    }
-                    break;
-                case WormholeDestroyed:
-                    closeWormhole(ShipInfo::ShipBuffer.param_pos);
-                    break;
-                case WormholeOpen:
-                    openWormhole(ShipInfo::ShipBuffer.param_pos);
-                    break;
-                case Instruction_Help:
-                    if (ShipInfo::myself.me.weaponType != THUAI7::WeaponType::NullWeaponType)
-                    {
-                        if (interrupt_codeRecorder.find(HelpID) != interrupt_codeRecorder.end())
-                        {
-                            auto search = std::make_shared<RoadSearch>(ShipInfo::ShipBuffer.param_pos, [](IShipAPI& api)
-                                                                       { return false; });
-                            int priority = PRIORITY_Help * RATIO + callStack.size();
-                            callStack.push({*search, RoadSearchID, priority});
-                            interrupt_codeRecorder.insert(HelpID);
-                        }
-                    }
-                    break;
-                default:
-                    break;
-            }
-        }
-    }
+    Commute::checkInfo(api);
 
     
     /**
@@ -3364,6 +3507,10 @@ bool ShipStep(IShipAPI& api)
     {
         res = Inspecting(api);
     }
+    else if (nextMode == REPAIR)
+    {
+        res = RepairMode::Perform(api);
+    }
     if (res)
     {
         ShipStep(api);
@@ -3380,7 +3527,13 @@ bool run = true;
 
 bool init_root = false;
 BT::SequenceNode<ITeamAPI> root;
-
+int counterAttackID[3] = {1, 2, 4};
+void setCounterAttack(int id)
+{
+    HomeInfo::TeamShipBuffer[id].with_param = true;
+    HomeInfo::TeamShipBuffer[id].instruction = Instruction_CounterAttack;
+    HomeInfo::TeamShipBuffer[id].param_pos = MapInfo::enemyResAndCons[MapInfo::counter_index];
+}
 
 void AI::play(ITeamAPI& api)  // 默认team playerID 为0
 {
@@ -3408,10 +3561,15 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
                 if (api.GetEnergy() >= 4000)
                     res = api.BuildShip(THUAI7::ShipType::CivilianShip, 0).get();
             }
-            else
+            else if (i == 3)
             {
                 if (api.GetEnergy() >= 12000)
                     res = api.BuildShip(THUAI7::ShipType::MilitaryShip, 0).get();
+            }
+            else
+            {
+                if (api.GetEnergy() >= 50000)
+                    res = api.BuildShip(THUAI7::ShipType::FlagShip, 0).get();
             }
             if (res)
             {
@@ -3428,18 +3586,20 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
         init_root = true;
 
         root = {
+
+    //new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_1,REPAIR, 1)}),
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_1,PRODUCE, 1)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(HomeInfo::first_id, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipAvailable(3)}),
 //            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, ATTACK, MODEPARAM_AttackHome)}),
-            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, IDLE)}),
+            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, INSPECT)}),
 
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipAvailable(3 - HomeInfo::first_id)}),
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, CONSTRUCT, MODEPARAM_ConstructFactory)}),
 
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(3 - HomeInfo::first_id, THUAI7::ModuleType::ModuleConstructor3), Conditions::ShipHasConstructor(3 - HomeInfo::first_id, THUAI7::ConstructorType::Constructor3)}),
-    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipAvailable(4)}),
-    //new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_4, ATTACK, MODEPARAM_AttackHome)}),
+    new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(50000), HomeAction::BuildShip(THUAI7::ShipType::FlagShip), Conditions::ShipAvailable(4)}),
+    new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_4, IDLE, MODEPARAM_AttackHome)}),
 
 
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(18000), HomeAction::InstallModule(3, THUAI7::ModuleType::ModuleArmor3), Conditions::ShipHasArmor(3, THUAI7::ArmorType::Armor3)}),
@@ -3456,10 +3616,46 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
 };
     }
     root.perform(api);
-    Commute::sync_ships(api);
-    if (frame_cnt > 7200)
+    if (frame_cnt > 1800)
     {
-
+        for (auto const& i : HomeInfo::MyShips)
+        {
+            if (i.armor == 0 and api.GetEnergy() > 20000)
+            {
+                api.InstallModule(i.playerID, THUAI7::ModuleType::ModuleArmor1);
+            }
+            if (i.shield == 0 and api.GetEnergy() > 20000)
+            {
+                api.InstallModule(i.playerID, THUAI7::ModuleType::ModuleShield1);
+            }
+        }
     }
-
+    if (frame_cnt == 7200)
+    {
+        auto f = api.GetGameInfo();
+        auto res = f.get();
+        int myscore = HomeInfo::MySide == RED ? res->redScore : res->blueScore;
+        int enemyscore = HomeInfo::MySide == BLUE ? res->redScore : res->blueScore;
+        if (myscore - enemyscore > 100000)
+        {
+            return;
+        }
+        else
+        {
+            counterAttackMode = true;
+        for (int i = 0; i < 3; i++)
+        {
+            HomeInfo::TeamShipBuffer[counterAttackID[i]].Mode = REPAIR;
+        }
+        }
+    }
+    Commute::sync_ships(api);
+    if (counterAttackMode and wormholeRepaired)
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            setCounterAttack(counterAttackID[i]);
+        }
+        Commute::sync_ships(api);
+    }
 }
