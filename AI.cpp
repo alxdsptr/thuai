@@ -2620,7 +2620,20 @@ inline coordinate judge_attack_pos(IShipAPI& api,double angle0,coordinate target
 {
     int fulldistance = WeaponToDis(ShipInfo::myself.me.weaponType);
     double distotar = euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, target1.x, target1.y);
+
+    int real_x = target1.x + distotar * cos(angle0);
+    int real_y = target1.y + distotar * sin(angle0);
+
+    if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, real_x, real_y) >= 650 && distotar <= fulldistance + 600)
+    {
+        return {
+            -1, -1
+        };
+    }
     fulldistance = (fulldistance > distotar) ? distotar : fulldistance;
+    double realangle = atan2(ShipInfo::myself.me.y - target1.y, ShipInfo::myself.me.x - target1.x);
+
+
 
     coordinate target(target1.x / 1000, target1.y / 1000);
 
