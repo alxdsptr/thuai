@@ -2619,7 +2619,8 @@ auto detectEnemy=[](IShipAPI& api)
 inline coordinate judge_attack_pos(IShipAPI& api,double angle0,coordinate target1)
 {
     int fulldistance = WeaponToDis(ShipInfo::myself.me.weaponType);
-
+    double distotar = euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, target1.x, target1.y);
+    fulldistance = (fulldistance > distotar) ? distotar : fulldistance;
 
     coordinate target(target1.x / 1000, target1.y / 1000);
 
@@ -2628,15 +2629,15 @@ inline coordinate judge_attack_pos(IShipAPI& api,double angle0,coordinate target
     double angle;
     bool position_OK = false;
     coordinate position = {-1, -1};
-    for (size_t angle_count = 1; angle_count < 11 &&!position_OK; angle_count++)
+    for (size_t angle_count = 0; angle_count < 5 &&!position_OK; angle_count++)
     {
-        angle = angle0 + ((angle_count % 2 == 0 ? 1 : -1)) * (angle_count / 2 + angle_count % 2) * asin(0.05);
-        int x = target1.x + cos(angle);
-        int y = target1.y + sin(angle);
+        angle = angle0 + ((angle_count % 2 == 0 ? 1 : -1)) * (angle_count / 2 + angle_count % 2) * asin((double)650/fulldistance);
+        int x = target1.x + fulldistance * cos(angle);
+        int y = target1.y + fulldistance * sin(angle);
         for (double i = 400; i < fulldistance and ok; i += 400)
         {
-            int x1 = x + cos(angle) * i;
-            int y1 = y + sin(angle) * i;
+            int x1 = x - cos(angle) * i;
+            int y1 = y - sin(angle) * i;
             int x0 = (x1 / 1000) * 1000;
             int y0 = (y1 / 1000) * 1000;
             int lx = x1 - x0;
@@ -2902,24 +2903,28 @@ void AI::play(IShipAPI& api)
         }
         else
         {
-            if (i->shipState == THUAI7::ShipState::Attacking&&ShipInfo::myself.me.weaponType == THUAI7::WeaponType::NullWeaponType)
+            if (ShipInfo::myself.me.weaponType == THUAI7::WeaponType::NullWeaponType )
             {
-                if (interrupt_codeRecorder.find(ReturnHomeID) == interrupt_codeRecorder.end())
+                if ((euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, i->x, i->y) < 6000 && i->shipState == THUAI7::ShipState::Attacking) || euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, i->x, i->y)<3000)
                 {
-                    double angle = i->facingDirection;
-                    double move_angle = angle + PI / 2;
-                    api.EndAllAction();
-                    api.Move(300, move_angle);
-                    coordinate target = *MapInfo::PositionLists[MapInfo::MyHome].begin();
-                    auto end_condition = [](IShipAPI&)
-                    { return false; };
-                    std::cout << "Triggered RoadSearch,target:" << target.x << "," << target.y << "\n";
+                    if (interrupt_codeRecorder.find(ReturnHomeID) == interrupt_codeRecorder.end())
+                    {
+                        // double angle = i->facingDirection;
+                        // double move_angle = angle + PI / 2;
+                        api.EndAllAction();
+                        // api.Move(300, move_angle);
+                        coordinate target = *MapInfo::PositionLists[MapInfo::MyHome].begin();
+                        auto end_condition = [](IShipAPI&)
+                        { return false; };
+                        std::cout << "Triggered RoadSearch,target:" << target.x << "," << target.y << "\n";
 
-                    auto search = std::make_shared<RoadSearch>(target, end_condition);
-                    int prior = PRIORITY_ReturnHome * RATIO + callStack.size();
-                    callStack.push({*search, ReturnHomeID, prior});
-                    interrupt_codeRecorder.insert(ReturnHomeID);
+                        auto search = std::make_shared<RoadSearch>(target, end_condition);
+                        int prior = PRIORITY_ReturnHome * RATIO + callStack.size();
+                        callStack.push({*search, ReturnHomeID, prior});
+                        interrupt_codeRecorder.insert(ReturnHomeID);
+                    }
                 }
+                
                 return;
             }
             else
