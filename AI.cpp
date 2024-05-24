@@ -47,6 +47,7 @@ extern const bool asynchronous = false;
 #define WormholeOpen (5)
 #define Instruction_CounterAttack (6) 
 #define Instruction_UnsetcounterAttack (7)
+#define Instruction_Help (8)
 
 #define Parameter_ResourceRunningOut (1)
 #define Parameter_ConstructionBuildUp (1)
@@ -61,6 +62,7 @@ extern const bool asynchronous = false;
 #define ReturnHomeID 3
 #define RecoveryID 4
 #define InspectID 5
+#define HelpID 6
 
 #define RATIO 1000
 
@@ -69,6 +71,7 @@ extern const bool asynchronous = false;
 #define PRIORITY_ReturnHome (3)
 #define PRIORITY_Dodge (2)
 #define PRIORITY_Normal (0)
+#define PRIORITY_Highest (10)
 
 // 选手需要依次将player1到player4的船类型在这里定义
 extern const std::array<THUAI7::ShipType, 4> ShipTypeDict = {
@@ -1455,6 +1458,10 @@ namespace Commute
 					}
                 }
             }
+            //else if (temp.instruction == Instruction_Help)
+            //{
+
+            //}
             reports_to_send.push_back(temp);
         }
     }
@@ -1995,7 +2002,7 @@ namespace IdleMode
                 if (InspectionList.empty())
                 {
                     //InspectionList = MapInfo::Ori_PositionLists[MapInfo::Place::Construction];
-                    for (auto const& i : MapInfo::PositionLists[MapInfo::Construction])
+                    for (auto const& i : MapInfo::myResAndCons)
                     {
 						InspectionList.insert(i);
 					}
@@ -2077,7 +2084,6 @@ namespace ConstructMode
             {
                 std::cout << "enemy construction" << std::endl;
                 MapInfo::eraseConstruction(target);
-                //TODO! 通知军舰攻击建筑
                 Commute::report(api, Instruction_RefreshConstruction, Parameter_EnemyBuildConstruction, target);
                 target = {-1, -1};
                 return true;
@@ -2228,8 +2234,8 @@ namespace AttackMode
             //TODO! 基地得知对方基地被消灭之后要做什么
         }
         else if(temp == THUAI7::PlaceType::Wormhole){
+            Commute::report(api, WormholeDestroyed, 0, tar);
             return api.GetWormholeHp(tar.x, tar.y) <= 0;
-            //TODO! 虫洞被消灭之后要做什么
         }
         else{
             return false;
@@ -2785,6 +2791,7 @@ inline coordinate judge_attack_pos(IShipAPI& api,double angle0,coordinate target
 int Ship_Init = 1;
 
 int Confrontation_Time_Count = -1;
+int frame_cnt = 0;
 
 void AI::play(IShipAPI& api)
 {
@@ -2907,6 +2914,19 @@ void AI::play(IShipAPI& api)
                 case WormholeOpen:
                     openWormhole(ShipInfo::ShipBuffer.param_pos);
                     break;
+                case Instruction_Help:
+                    if (ShipInfo::myself.me.weaponType != THUAI7::WeaponType::NullWeaponType)
+                    {
+                        if (interrupt_codeRecorder.find(HelpID) != interrupt_codeRecorder.end())
+                        {
+                            auto search = std::make_shared<RoadSearch>(ShipInfo::ShipBuffer.param_pos, [](IShipAPI& api)
+                                                                       { return false; });
+                            int priority = PRIORITY_Highest * RATIO + callStack.size();
+                            callStack.push({*search, RoadSearchID, priority});
+                            interrupt_codeRecorder.insert(HelpID);
+                        }
+                    }
+                    break;
                 default:
                     break;
             }
@@ -2952,7 +2972,7 @@ void AI::play(IShipAPI& api)
             }
             else
             {
-                //TODO! 遇到无武装敌舰报告基地
+                Commute::report(api, Instruction_Help, 0, {i->x, i->y});
             }
         }
         else
@@ -2961,6 +2981,7 @@ void AI::play(IShipAPI& api)
             {
                 if ((euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, i->x, i->y) < 6000 && i->shipState == THUAI7::ShipState::Attacking) || euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, i->x, i->y)<3000)
                 {
+                    Commute::report(api, Instruction_Help, 0, {i->x, i->y});
                     if (interrupt_codeRecorder.find(ReturnHomeID) == interrupt_codeRecorder.end())
                     {
                         // double angle = i->facingDirection;
@@ -3149,7 +3170,7 @@ BT::SequenceNode<ITeamAPI> root;
 
 void AI::play(ITeamAPI& api)  // 默认team playerID 为0
 {
-
+    frame_cnt++;
     HomeInfo::CheckInfo(api);
     Commute::receive_message(api);
     for (size_t i = 0; i < 4; i++)
@@ -3222,9 +3243,9 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     }
     root.perform(api);
     Commute::sync_ships(api);
-    //std::this_thread::sleep_for(std::chrono::milliseconds(15));
-    /*
-    new BT::eventNode({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(2, THUAI7::ModuleType::ModuleProducer3)}),
-    new BT::eventNode({Conditions::EnergyThreshold(10000), HomeAction::InstallModule(1, THUAI7::ModuleType::ModuleLaserGun)})*/
+    if (frame_cnt > 7200)
+    {
+
+    }
 
 }
