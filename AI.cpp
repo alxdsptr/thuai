@@ -2686,9 +2686,10 @@ namespace Commute
                     MapInfo::counter_index++;
                 }
             }
-            else if (temp.instruction == WormholeRepaired)
+            else if (temp.instruction == WormholeRepaired or temp.instruction == WormholeOpen)
             {
                 wormholeRepaired = true;
+                HomeInfo::TeamShipBuffer[3].Mode = INSPECT;
             }
             // else if (temp.instruction == Instruction_Help)
             //{
@@ -3616,6 +3617,10 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
 };
     }
     root.perform(api);
+
+        auto f = api.GetGameInfo();
+        auto res = f.get();
+        cout << "redScore:" << res->redScore << " blueScore:" << res->blueScore << endl;
     if (frame_cnt > 1800)
     {
         for (auto const& i : HomeInfo::MyShips)
@@ -3630,7 +3635,7 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
             }
         }
     }
-    if (frame_cnt == 7200)
+    if (frame_cnt == 3600)
     {
         auto f = api.GetGameInfo();
         auto res = f.get();
@@ -3643,9 +3648,9 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
         else
         {
             counterAttackMode = true;
-        for (int i = 0; i < 3; i++)
+        for (int i = 1; i <= 4; i++)
         {
-            HomeInfo::TeamShipBuffer[counterAttackID[i]].Mode = REPAIR;
+            HomeInfo::TeamShipBuffer[i].Mode = REPAIR;
         }
         }
     }
