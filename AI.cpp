@@ -538,11 +538,11 @@ inline int manhatten_distance(int x1, int y1, coordinate c)
 {
     return abs(x1 - c.x) + abs(y1 - c.y);
 }
-double euclidean_distance(double x1, double y1, double x2, double y2)
+inline double euclidean_distance(double x1, double y1, double x2, double y2)
 {
 	return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2));
 }
-double euclidean_distance(coordinate x, coordinate y)
+inline double euclidean_distance(coordinate x, coordinate y)
 {
     return sqrt((x.x - y.x) * (x.x - y.x) + (x.y - y.y) * (x.y - y.y));
 }
@@ -2427,7 +2427,7 @@ auto MyRecovery = [] (IShipAPI & api)
         {
             if (manhatten_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, *MapInfo::PositionLists[MapInfo::MyHome].begin()) <= 1)
             {
-                auto reply=api.Recover(fullHp-ShipInfo::myself.me.hp);
+                auto reply = api.Recover((api.GetEnergy() > fullHp - ShipInfo::myself.me.hp) ? fullHp - ShipInfo::myself.me.hp : api.GetEnergy());
                 std::cout << "Recover Called, status:" << (reply.get() ? "success\n" : "fail\n");
 
                 return false;
@@ -2437,7 +2437,8 @@ auto MyRecovery = [] (IShipAPI & api)
                 std::cout << "RecoveryMode：RoadSearch\n";
 
                 //没到家就寻路
-                auto search = std::make_shared<RoadSearch>(*MapInfo::PositionLists[MapInfo::MyHome].begin(), [](IShipAPI& api)
+                static coordinate recoverypoint = (MapInfo::MySide == RED) ? coordinate{2, 47} : coordinate{47,2};
+                auto search = std::make_shared<RoadSearch>(recoverypoint, [](IShipAPI& api)
                                                            { return (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, (*MapInfo::PositionLists[MapInfo::MyHome].begin()).x, (*MapInfo::PositionLists[MapInfo::MyHome].begin()).y) <= 1); });
                 int priority = PRIORITY_Recovery * RATIO + callStack.size();
                 callStack.push({*search, RoadSearchID, priority});
@@ -2615,6 +2616,113 @@ auto detectEnemy=[](IShipAPI& api)
     } 
 };*/
 
+inline coordinate judge_attack_pos(IShipAPI& api,double angle0,coordinate target1)
+{
+    int fulldistance = WeaponToDis(ShipInfo::myself.me.weaponType);
+
+
+    coordinate target(target1.x / 1000, target1.y / 1000);
+
+    bool ok = true;
+    static int r = 200;
+    double angle;
+    bool position_OK = false;
+    coordinate position = {-1, -1};
+    for (size_t angle_count = 1; angle_count < 11 &&!position_OK; angle_count++)
+    {
+        angle = angle0 + ((angle_count % 2 == 0 ? 1 : -1)) * (angle_count / 2 + angle_count % 2) * asin(0.05);
+        int x = target1.x + cos(angle);
+        int y = target1.y + sin(angle);
+        for (double i = 400; i < fulldistance and ok; i += 400)
+        {
+            int x1 = x + cos(angle) * i;
+            int y1 = y + sin(angle) * i;
+            int x0 = (x1 / 1000) * 1000;
+            int y0 = (y1 / 1000) * 1000;
+            int lx = x1 - x0;
+            int ly = y1 - y0;
+            std::vector<coordinate> judge;
+
+            coordinate tmp(x1 / 1000, y1 / 1000);  // 格子数的坐标
+            THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
+            if (tmp == target)
+            {
+                break;
+            }
+            if (tmp != target and !can_attack(tmp.x, tmp.y))
+            //(tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
+            {
+                break;
+            }
+            if (lx < r)
+            {
+                judge.push_back({tmp.x - 1, tmp.y});
+            }
+            else if (lx > 1000 - r)
+            {
+                judge.push_back({tmp.x + 1, tmp.y});
+            }
+            if (ly < r)
+            {
+                judge.push_back({tmp.x, tmp.y - 1});
+            }
+            else if (ly > 1000 - r)
+            {
+                judge.push_back({tmp.x, tmp.y + 1});
+            }
+            if (euclidean_distance(x1, y1, x0, y0) < r)
+            {
+                judge.push_back({tmp.x - 1, tmp.y - 1});
+            }
+            else if (euclidean_distance(x1, y1, x0 + 1000, y0) < r)
+            {
+                judge.push_back({tmp.x + 1, tmp.y - 1});
+            }
+            else if (euclidean_distance(x1, y1, x0 + 1000, y0 + 1000) < r)
+            {
+                judge.push_back({tmp.x + 1, tmp.y + 1});
+            }
+            else if (euclidean_distance(x1, y1, x0, y0 + 1000) < r)
+            {
+                judge.push_back({tmp.x - 1, tmp.y + 1});
+            }
+            for (auto& i : judge)
+            {
+                if (i.x < 0 or i.x >= 50 or i.y < 0 or i.y >= 50)
+                {
+                    continue;
+                }
+                if (i != target and !can_attack(i.x, i.y))
+                {
+                    break;
+                }
+            }
+            position_OK = true;
+        }
+        if (position_OK)
+        {
+            position = {x, y};
+        }
+    }
+    if (euclidean_distance(position.x,position.y,ShipInfo::myself.me.x,ShipInfo::myself.me.y)<=100)
+    {
+        return {
+            -1, -1
+        };
+    }
+    else if (position.x==-1)
+    {
+        return {
+            -2, -2
+        };
+    }
+    else
+    {
+        return position;
+    }
+
+   
+}
 
 int Ship_Init = 1;
 
@@ -2794,7 +2902,7 @@ void AI::play(IShipAPI& api)
         }
         else
         {
-            if (ShipInfo::myself.me.weaponType == THUAI7::WeaponType::NullWeaponType)
+            if (i->shipState == THUAI7::ShipState::Attacking&&ShipInfo::myself.me.weaponType == THUAI7::WeaponType::NullWeaponType)
             {
                 if (interrupt_codeRecorder.find(ReturnHomeID) == interrupt_codeRecorder.end())
                 {
@@ -2817,22 +2925,40 @@ void AI::play(IShipAPI& api)
             else
             {
                 //api.EndAllAction();
-                if (i->shipState == THUAI7::ShipState::Attacking)
+                if (i->shipState == THUAI7::ShipState::Attacking && euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y,i->x,i->y)<6000)
                 {
                     if (interrupt_codeRecorder.find(DodgeID) == interrupt_codeRecorder.end() && interrupt_codeRecorder.find(RecoveryID) == interrupt_codeRecorder.end())
                     {
                         api.EndAllAction();
                         double angle = i->facingDirection;
-                        double move_angle = angle + PI / 2;
-                        // BT::SequenceNode<IShipAPI> dodgeNode{
-                        auto init_list = {new BT::eventNode<IShipAPI>{Conditions::always_ship, ShipAction::MoveFunc(move_angle, 200)}, new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), ShipAction::AttackFunc(i->x, i->y)}};
-                        auto dodgeNode = std::make_shared<BT::SequenceNode<IShipAPI>>(std::move(init_list));
-                        interrupt_codeRecorder.insert(DodgeID);
-                        int priority = PRIORITY_Dodge * RATIO + callStack.size();
-                        callStack.push({[dodgeNode](IShipAPI& api)
-                                        { return dodgeNode->perform(api) == BT::SUCCESS; },
-                                        DodgeID,
-                                        priority});
+                        coordinate target_ship = {i->x, i->y};
+                        coordinate get_pos = judge_attack_pos(api, angle, target_ship);
+                        if (get_pos.x<0)
+                        {
+                            auto init_list = {new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), ShipAction::AttackFunc(i->x, i->y)}};
+                            auto dodgeNode = std::make_shared<BT::SequenceNode<IShipAPI>>(std::move(init_list));
+                            interrupt_codeRecorder.insert(DodgeID);
+                            int priority = PRIORITY_Dodge * RATIO + callStack.size();
+                            callStack.push({[dodgeNode](IShipAPI& api)
+                                            { return dodgeNode->perform(api) == BT::SUCCESS; },
+                                            DodgeID,
+                                            priority});
+                        }
+                        else
+                        {
+                            double move_angle = atan2(get_pos.y - ShipInfo::myself.me.y, get_pos.x - ShipInfo::myself.me.x);
+                            double time = euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, get_pos.x, get_pos.y)/ShipInfo::myself.me.speed*1000;
+                            // BT::SequenceNode<IShipAPI> dodgeNode{
+                            auto init_list = {new BT::eventNode<IShipAPI>{Conditions::always_ship, ShipAction::MoveFunc(move_angle, time)}, new BT::eventNode<IShipAPI>{Conditions::JudgeSelfState(THUAI7::ShipState::Idle), ShipAction::AttackFunc(i->x, i->y)}};
+                            auto dodgeNode = std::make_shared<BT::SequenceNode<IShipAPI>>(std::move(init_list));
+                            interrupt_codeRecorder.insert(DodgeID);
+                            int priority = PRIORITY_Dodge * RATIO + callStack.size();
+                            callStack.push({[dodgeNode](IShipAPI& api)
+                                            { return dodgeNode->perform(api) == BT::SUCCESS; },
+                                            DodgeID,
+                                            priority});
+                        }
+
                     }
                     break;
                 }
@@ -3012,7 +3138,7 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(HomeInfo::first_id, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipAvailable(3)}),
 //            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, ATTACK, MODEPARAM_AttackHome)}),
-            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, INSPECT, MODEPARAM_AttackHome)}), 
+            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, ATTACK, MODEPARAM_AttackHome)}), 
 
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipAvailable(3 - HomeInfo::first_id)}),
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, CONSTRUCT, MODEPARAM_ConstructFactory)}),
