@@ -73,12 +73,12 @@ extern const bool asynchronous = false;
 #define RATIO 1000
 
 #define PRIORITY_Inspection (0.5)
-#define PRIORITY_Recovery (20)
+#define PRIORITY_Recovery (15)
 #define PRIORITY_ReturnHome (3)
-#define PRIORITY_Dodge (15)
+#define PRIORITY_Dodge (20)
 #define PRIORITY_Normal (0)
 #define PRIORITY_Help (10)
-#define PRIORITY_Counter_Attack (1.5)
+#define PRIORITY_Counter_Attack (2)
 
 // 选手需要依次将player1到player4的船类型在这里定义
 extern const std::array<THUAI7::ShipType, 4> ShipTypeDict = {
@@ -2713,13 +2713,9 @@ auto CounterAttacking = [](IShipAPI& api) {
                         }
 
                     }
-                    else if (res.value().teamID<0)
-                    {
-                        api.Construct(THUAI7::ConstructionType::Factory);
-                    }
                     else
                     {
-                        if (res.value().hp > 0)
+                        if (res.value().hp > 0 and ShipInfo::myself.me.shipState != THUAI7::ShipState::Attacking and ShipInfo::myself.me.shipState != THUAI7::ShipState::Swinging)
                         {
                             api.Attack(atan2(counterattack_target.y * 1000 + 500 - ShipInfo::myself.me.y, counterattack_target.x * 1000 + 500 - ShipInfo::myself.me.x));
                         }
@@ -2731,6 +2727,7 @@ auto CounterAttacking = [](IShipAPI& api) {
                 }
                 else
                 {
+                    api.Construct(THUAI7::ConstructionType::Factory);
                 }
             }
         }
@@ -2739,14 +2736,6 @@ auto CounterAttacking = [](IShipAPI& api) {
             MapInfo::Place this_place = MapInfo::fullmap[counterattack_target.x][counterattack_target.y];
             if (this_place == MapInfo::Resource)
             {
-                if (api.GetResourceState(counterattack_target.x, counterattack_target.y) > 0)
-                {
-                }
-                else
-                {
-                    Commute::report(api, Instruction_CounterAttackOK, 0, counterattack_target);
-                    counterattack_oldtarget = counterattack_target;
-                }
             }
             else
             {
@@ -2760,21 +2749,10 @@ auto CounterAttacking = [](IShipAPI& api) {
                         {
                             api.Construct(type);
                         }
-                        else
-                        {
-                            api.EndAllAction();
-                            Commute::report(api, Instruction_CounterAttackOK, 0, counterattack_target);
-                            counterattack_oldtarget = counterattack_target;
-                        }
-
-                    }
-                    else if (res.value().teamID<0)
-                    {
-                        api.Construct(THUAI7::ConstructionType::Factory);
                     }
                     else
                     {
-                        if (res.value().hp > 0)
+                        if (res.value().hp > 0 and ShipInfo::myself.me.shipState != THUAI7::ShipState::Attacking and ShipInfo::myself.me.shipState != THUAI7::ShipState::Swinging)
                         {
                             api.Attack(atan2(counterattack_target.y * 1000 + 500 - ShipInfo::myself.me.y, counterattack_target.x * 1000 + 500 - ShipInfo::myself.me.x));
                         }
@@ -2786,11 +2764,10 @@ auto CounterAttacking = [](IShipAPI& api) {
                 }
                 else
                 {
+                    api.Construct(THUAI7::ConstructionType::Factory);
                 }
             }
         }
-
-
     }
 
     return false;
