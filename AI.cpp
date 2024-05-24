@@ -2629,7 +2629,7 @@ inline coordinate judge_attack_pos(IShipAPI& api,double angle0,coordinate target
     double angle;
     bool position_OK = false;
     coordinate position = {-1, -1};
-    for (size_t angle_count = 0; angle_count < 5 &&!position_OK; angle_count++)
+    for (size_t angle_count = 1; angle_count < 5 &&!position_OK; angle_count++)
     {
         angle = angle0 + ((angle_count % 2 == 0 ? 1 : -1)) * (angle_count / 2 + angle_count % 2) * asin((double)650/fulldistance);
         int x = target1.x + fulldistance * cos(angle);
