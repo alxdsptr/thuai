@@ -42,12 +42,18 @@ extern const bool asynchronous = false;
 #define Instruction_RefreshResource (1)
 #define Instruction_RefreshConstruction (2)
 #define Instruction_AttackState (3)
+
+#define Instruction_CounterAttack (6)
+#define Instruction_UnsetCounterAttack (7)
+#define Instruction_CounterAttackOK (8)
+
 //#define Instruction_Inspecting (4)
 #define WormholeDestroyed (4)
 #define WormholeOpen (5)
-#define Instruction_CounterAttack (6) 
+#define Instruction_CounterAttack (6)
 #define Instruction_UnsetcounterAttack (7)
 #define Instruction_Help (8)
+#define Instruction_CounterAttackOK (9)
 
 #define Parameter_ResourceRunningOut (1)
 #define Parameter_ConstructionBuildUp (1)
@@ -72,6 +78,7 @@ extern const bool asynchronous = false;
 #define PRIORITY_Dodge (15)
 #define PRIORITY_Normal (0)
 #define PRIORITY_Help (10)
+#define PRIORITY_Counter_Attack (1.5)
 
 // 选手需要依次将player1到player4的船类型在这里定义
 extern const std::array<THUAI7::ShipType, 4> ShipTypeDict = {
@@ -1974,7 +1981,7 @@ namespace IdleMode
                     }
                     return true;
                 }
-                if (construction.hp > 1000)
+                if (construction.hp > 0)
                 {
                     if (ShipInfo::myself.me.shipState != THUAI7::ShipState::Attacking and ShipInfo::myself.me.shipState != THUAI7::ShipState::Swinging)
                     {
@@ -2633,6 +2640,164 @@ auto Inspecting = [](IShipAPI& api)
 };
 
 
+coordinate counterattack_target(-1, -1);
+coordinate counterattack_oldtarget(-1, -1);
+
+    /**
+ * @brief 反攻阶段代码
+ * 优先级：1.5
+ */
+auto CounterAttacking = [](IShipAPI& api) {
+
+    if (counterattack_target.x==-1)
+    {
+        return false;
+    }
+    if (counterattack_oldtarget==counterattack_target)
+    {
+        return false;
+    }
+
+    if (euclidean_distance(ShipInfo::myself.me.x/1000,ShipInfo::myself.me.y/1000,counterattack_target.x,counterattack_target.y)>2)
+    {
+        if (ShipInfo::myself.me.playerID <= 2)
+        {
+            auto search = std::make_shared<RoadSearch>(counterattack_target, [](IShipAPI& api)
+                                                       { return (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, counterattack_target.x, counterattack_target.y) <= 1); });
+            int priority = PRIORITY_Counter_Attack * RATIO + callStack.size();
+            callStack.push({*search, RoadSearchID, priority});
+        }
+        else
+        {
+            auto search = std::make_shared<RoadSearch>(counterattack_target, [](IShipAPI& api)
+                                                       { return (euclidean_distance(ShipInfo::myself.me.x / 1000, ShipInfo::myself.me.y / 1000, counterattack_target.x, counterattack_target.y) <= 2); });
+            int priority = PRIORITY_Counter_Attack * RATIO + callStack.size();
+            callStack.push({*search, RoadSearchID, priority});
+        }
+        return false;
+    }
+    else
+    {
+        if (ShipInfo::myself.me.playerID<=2)
+        {
+            MapInfo::Place this_place = MapInfo::fullmap[counterattack_target.x][counterattack_target.y];
+            if (this_place == MapInfo::Resource)
+            {
+                if (api.GetResourceState(counterattack_target.x, counterattack_target.y) > 0)
+                {
+                    api.Produce();
+                }
+                else
+                {
+                    Commute::report(api, Instruction_CounterAttackOK, 0, counterattack_target);
+                    counterattack_oldtarget = counterattack_target;
+                }
+            }
+            else
+            {
+                auto res = api.GetConstructionState(counterattack_target.x, counterattack_target.y);
+                if (res.has_value())
+                {
+                    if (res.value().teamID==ShipInfo::myself.me.teamID)
+                    {
+                        auto type = res.value().constructionType;
+                        if (!ConstructionFullHp(res.value().hp, type))
+                        {
+                            api.Construct(type);
+                        }
+                        else
+                        {
+                            api.EndAllAction();
+                            Commute::report(api, Instruction_CounterAttackOK, 0, counterattack_target);
+                            counterattack_oldtarget = counterattack_target;
+                        }
+
+                    }
+                    else if (res.value().teamID<0)
+                    {
+                        api.Construct(THUAI7::ConstructionType::Factory);
+                    }
+                    else
+                    {
+                        if (res.value().hp > 0)
+                        {
+                            api.Attack(atan2(counterattack_target.y * 1000 + 500 - ShipInfo::myself.me.y, counterattack_target.x * 1000 + 500 - ShipInfo::myself.me.x));
+                        }
+                        else
+                        {
+                            api.Construct(THUAI7::ConstructionType::Fort);
+                        }
+                    }
+                }
+                else
+                {
+                }
+            }
+        }
+        else
+        {
+            MapInfo::Place this_place = MapInfo::fullmap[counterattack_target.x][counterattack_target.y];
+            if (this_place == MapInfo::Resource)
+            {
+                if (api.GetResourceState(counterattack_target.x, counterattack_target.y) > 0)
+                {
+                }
+                else
+                {
+                    Commute::report(api, Instruction_CounterAttackOK, 0, counterattack_target);
+                    counterattack_oldtarget = counterattack_target;
+                }
+            }
+            else
+            {
+                auto res = api.GetConstructionState(counterattack_target.x, counterattack_target.y);
+                if (res.has_value())
+                {
+                    if (res.value().teamID==ShipInfo::myself.me.teamID)
+                    {
+                        auto type = res.value().constructionType;
+                        if (!ConstructionFullHp(res.value().hp, type))
+                        {
+                            api.Construct(type);
+                        }
+                        else
+                        {
+                            api.EndAllAction();
+                            Commute::report(api, Instruction_CounterAttackOK, 0, counterattack_target);
+                            counterattack_oldtarget = counterattack_target;
+                        }
+
+                    }
+                    else if (res.value().teamID<0)
+                    {
+                        api.Construct(THUAI7::ConstructionType::Factory);
+                    }
+                    else
+                    {
+                        if (res.value().hp > 0)
+                        {
+                            api.Attack(atan2(counterattack_target.y * 1000 + 500 - ShipInfo::myself.me.y, counterattack_target.x * 1000 + 500 - ShipInfo::myself.me.x));
+                        }
+                        else
+                        {
+                            api.Construct(THUAI7::ConstructionType::Fort);
+                        }
+                    }
+                }
+                else
+                {
+                }
+            }
+        }
+
+
+    }
+
+    return false;
+};
+
+
+
 /**
  * @brief 对应的Interruptcode:1
  */
@@ -2668,13 +2833,13 @@ auto detectEnemy=[](IShipAPI& api)
 
 inline coordinate judge_attack_pos(IShipAPI& api,double angle0,coordinate target1)
 {
-    int fulldistance = WeaponToDis(ShipInfo::myself.me.weaponType);
+    int fulldistance = WeaponToDis(ShipInfo::myself.me.weaponType)+600;
     double distotar = euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, target1.x, target1.y);
 
     int real_x = target1.x + distotar * cos(angle0);
     int real_y = target1.y + distotar * sin(angle0);
 
-    if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, real_x, real_y) >= 650 && distotar <= fulldistance + 600)
+    if (euclidean_distance(ShipInfo::myself.me.x, ShipInfo::myself.me.y, real_x, real_y) >= 650 && distotar <= fulldistance)
     {
         return {
             -1, -1
@@ -2687,8 +2852,9 @@ inline coordinate judge_attack_pos(IShipAPI& api,double angle0,coordinate target
 
     coordinate target(target1.x / 1000, target1.y / 1000);
 
-    bool ok = true;
+
     static int r = 200;
+    static int r1 = 400;
     double angle;
     bool position_OK = false;
     coordinate position = {-1, -1};
@@ -2697,6 +2863,7 @@ inline coordinate judge_attack_pos(IShipAPI& api,double angle0,coordinate target
         angle = angle0 + ((angle_count % 2 == 0 ? 1 : -1)) * (angle_count / 2 + angle_count % 2) * asin((double)650/fulldistance);
         int x = target1.x + fulldistance * cos(angle);
         int y = target1.y + fulldistance * sin(angle);
+        bool ok = true;
         for (double i = 400; i < fulldistance and ok; i += 400)
         {
             int x1 = x - cos(angle) * i;
@@ -2709,11 +2876,8 @@ inline coordinate judge_attack_pos(IShipAPI& api,double angle0,coordinate target
 
             coordinate tmp(x1 / 1000, y1 / 1000);  // 格子数的坐标
             THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
-            if (tmp == target)
-            {
-                break;
-            }
-            if (tmp != target and !can_attack(tmp.x, tmp.y))
+
+            if ( !can_attack(tmp.x, tmp.y))
             //(tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
             {
                 break;
@@ -2756,16 +2920,87 @@ inline coordinate judge_attack_pos(IShipAPI& api,double angle0,coordinate target
                 {
                     continue;
                 }
-                if (i != target and !can_attack(i.x, i.y))
+                if (!can_attack(i.x, i.y))
+                {
+                    break;
+                }
+            }
+        }
+
+        int x1 = x, y1 = y;
+        x = ShipInfo::myself.me.x;
+        y = ShipInfo::myself.me.y;
+        angle = atan2(y1 - y, x1 - x);
+        double dis2 = euclidean_distance(x, y, x1, y1);
+
+        for (double i = 50; i < dis2 and ok; i += 50)
+        {
+            int x1 = x + cos(angle) * i;
+            int y1 = y + sin(angle) * i;
+            int x0 = (x1 / 1000) * 1000;
+            int y0 = (y1 / 1000) * 1000;
+            int lx = x1 - x0;
+            int ly = y1 - y0;
+            std::vector<coordinate> judge;
+
+            coordinate tmp(x1 / 1000, y1 / 1000);  // 格子数的坐标
+            THUAI7::PlaceType tmptype = MapInfo::map[tmp.x][tmp.y];
+
+            if (!can_attack(tmp.x, tmp.y))
+            //(tmptype == THUAI7::PlaceType::Asteroid || tmptype == THUAI7::PlaceType::Construction || tmptype == THUAI7::PlaceType::Home || tmptype == THUAI7::PlaceType::Resource || tmptype == THUAI7::PlaceType::Ruin || (MapInfo::PositionLists[MapInfo::ClosedWormhole].find(tmp) != MapInfo::PositionLists[MapInfo::ClosedWormhole].end())))
+            {
+                break;
+            }
+            if (lx < r1)
+            {
+                judge.push_back({tmp.x - 1, tmp.y});
+            }
+            else if (lx > 1000 - r1)
+            {
+                judge.push_back({tmp.x + 1, tmp.y});
+            }
+            if (ly < r1)
+            {
+                judge.push_back({tmp.x, tmp.y - 1});
+            }
+            else if (ly > 1000 - r1)
+            {
+                judge.push_back({tmp.x, tmp.y + 1});
+            }
+            if (euclidean_distance(x1, y1, x0, y0) < r1)
+            {
+                judge.push_back({tmp.x - 1, tmp.y - 1});
+            }
+            else if (euclidean_distance(x1, y1, x0 + 1000, y0) < r1)
+            {
+                judge.push_back({tmp.x + 1, tmp.y - 1});
+            }
+            else if (euclidean_distance(x1, y1, x0 + 1000, y0 + 1000) < r1)
+            {
+                judge.push_back({tmp.x + 1, tmp.y + 1});
+            }
+            else if (euclidean_distance(x1, y1, x0, y0 + 1000) < r1)
+            {
+                judge.push_back({tmp.x - 1, tmp.y + 1});
+            }
+            for (auto& i : judge)
+            {
+                if (i.x < 0 or i.x >= 50 or i.y < 0 or i.y >= 50)
+                {
+                    continue;
+                }
+                if (!can_attack(i.x, i.y))
                 {
                     break;
                 }
             }
             position_OK = true;
         }
+
         if (position_OK)
         {
             position = {x, y};
+
         }
     }
     if (euclidean_distance(position.x,position.y,ShipInfo::myself.me.x,ShipInfo::myself.me.y)<=100)
@@ -2787,6 +3022,8 @@ inline coordinate judge_attack_pos(IShipAPI& api,double angle0,coordinate target
 
    
 }
+
+
 
 int Ship_Init = 1;
 
@@ -3218,7 +3455,7 @@ void AI::play(ITeamAPI& api)  // 默认team playerID 为0
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(8000), HomeAction::InstallModule(HomeInfo::first_id, THUAI7::ModuleType::ModuleProducer3), Conditions::ShipHasProducer(1, THUAI7::ProducerType::Producer3)}),
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(12000), HomeAction::BuildShip(THUAI7::ShipType::MilitaryShip), Conditions::ShipAvailable(3)}),
 //            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, ATTACK, MODEPARAM_AttackHome)}),
-            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, IDLE)}), 
+            new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_2, IDLE)}),
 
     new BT::eventNode<ITeamAPI>({Conditions::EnergyThreshold(4000), HomeAction::BuildShip(THUAI7::ShipType::CivilianShip), Conditions::ShipAvailable(3 - HomeInfo::first_id)}),
     new BT::eventNode<ITeamAPI>({Conditions::always, HomeAction::SetShipMode(SHIP_3, CONSTRUCT, MODEPARAM_ConstructFactory)}),
